@@ -15,6 +15,8 @@ extern uchar game_paused, wrapper_panel_on, olh_overlay_on;
 extern void middleize_mouse(void);
 
 static TouchControls touch;
+static TouchMovieTap movie_tap;
+static bool movie_tap_enabled;
 static bool initialized, syncing, controller_connected, background, unfocused;
 static bool requested_look;
 static int output_width, output_height, window_width, window_height;
@@ -103,6 +105,11 @@ static void output(void *user, TouchOutput event, float x, float y) {
     case TOUCH_CANCEL:
         clear_movement();
         touch_input_cancel();
+        touch_input_cancel_actions();
+        break;
+    case TOUCH_ACTION_DOWN:
+    case TOUCH_ACTION_UP:
+        touch_input_action((TouchAction)(int)x, event == TOUCH_ACTION_DOWN);
         break;
     case TOUCH_MODE_CHANGED:
         request_mode(touch.effective_mode == TOUCH_GAMEPLAY);
@@ -136,6 +143,23 @@ static void output(void *user, TouchOutput event, float x, float y) {
         pointer(x, y);
         touch_input_button(true, false);
         break;
+    case TOUCH_POINTER_TAP: {
+        float gx, gy;
+        request_mode(false);
+        touch_map_cursor(x, y, game_viewport, game_scale_x, game_scale_y,
+                         game_width, game_height, &gx, &gy);
+        touch_input_pointer(gx, gy);
+        /* Capture the target before the first press changes a panel or loop. */
+        TouchCursorTarget target = touch_cursor_target_at((int)gx, (int)gy);
+        touch_input_button(true, true);
+        touch_input_button(true, false);
+        if (target == TOUCH_TARGET_WORLD || target == TOUCH_TARGET_UI_OBJECT) {
+            /* The original UI queue turns the second down into LDOUBLE. */
+            touch_input_button(true, true);
+            touch_input_button(true, false);
+        }
+        break;
+    }
     }
 }
 
@@ -148,6 +172,8 @@ void touch_bridge_init(void) {
     SDL_SetHintWithPriority(SDL_HINT_TOUCH_MOUSE_EVENTS, "0", SDL_HINT_OVERRIDE);
     SDL_SetHintWithPriority(SDL_HINT_MOUSE_TOUCH_EVENTS, "0", SDL_HINT_OVERRIDE);
     touch_init(&touch, output, NULL);
+    touch_movie_tap_reset(&movie_tap);
+    movie_tap_enabled = false;
     initialized = true;
 #if defined(__ANDROID__) && defined(TOUCH_DEBUG)
     diagnostic_state_valid = false;
@@ -158,6 +184,7 @@ void touch_bridge_init(void) {
 
 void touch_bridge_cancel(void) {
     if (initialized) touch_cancel(&touch);
+    touch_movie_tap_reset(&movie_tap);
 }
 
 void touch_bridge_sync(void) {
@@ -176,11 +203,11 @@ void touch_bridge_sync(void) {
     SDL_RenderWindowToLogical(renderer, 0, 0, &origin_x, &origin_y);
     TouchRect viewport = {-origin_x * sx, -origin_y * sy, w * sx, h * sy};
     if (w != game_width || h != game_height || sx != game_scale_x || sy != game_scale_y ||
-        viewport.x != game_viewport.x || viewport.y != game_viewport.y) touch_cancel(&touch);
+        viewport.x != game_viewport.x || viewport.y != game_viewport.y) touch_bridge_cancel();
     game_width = w; game_height = h; game_scale_x = sx; game_scale_y = sy;
     game_viewport = viewport;
     if (ow != output_width || oh != output_height || ww != window_width || wh != window_height) {
-        touch_cancel(&touch);
+        touch_bridge_cancel();
         output_width = ow; output_height = oh; window_width = ww; window_height = wh;
     }
     bool available = gameplay_available();
@@ -194,7 +221,14 @@ void touch_bridge_sync(void) {
         touch_set_mode(&touch, TOUCH_CURSOR);
     }
     enabled = enabled && w > 0 && h > 0 && sx > 0 && sy > 0;
+    bool movie = enabled && _current_loop == CUTSCENE_LOOP && !(_change_flag & GL_CHG_LOOP);
+    if (movie != movie_tap_enabled) touch_movie_tap_reset(&movie_tap);
+    movie_tap_enabled = movie;
     touch_configure(&touch, (float)ow, (float)oh, enabled, available, controller_connected);
+    touch.pause_available = global_fullmap && !global_fullmap->cyber &&
+        (_current_loop == GAME_LOOP || _current_loop == FULLSCREEN_LOOP || _current_loop == SVGA_LOOP) &&
+        !(_change_flag & GL_CHG_LOOP) && !wrapper_panel_on && !olh_overlay_on &&
+        !controller_connected;
     /* Preserve Alpha 1 look sensitivity: surface deltas become the same
        logical pixel deltas as before, without clamping motion in the bars. */
     touch.look_scale = sx > 0 ? 1.0f / sx : 1.0f;
@@ -224,6 +258,20 @@ void touch_bridge_event(const SDL_Event *event) {
         touch_bridge_sync();
         if (surface.phase == TOUCH_ABORT || surface.width != output_width || surface.height != output_height) {
             touch_bridge_cancel();
+            return;
+        }
+        if (movie_tap_enabled) {
+            /* The cutscene's existing key handler skips on Escape down. Send
+               one ordered key pair after a completed raw-surface tap. */
+            if (touch_movie_tap_event(&movie_tap, surface.phase, surface.device,
+                                      surface.finger, surface.x, surface.y,
+                                      surface.sample_ms, (float)output_height*(8.0f/768.0f))) {
+#if defined(__ANDROID__) && !defined(TOUCH_HEADLESS)
+                SDL_Log("RP5NP_CUTSCENE_TOUCH_SKIP tap=1");
+#endif
+                touch_input_action(TOUCH_PAUSE, true);
+                touch_input_action(TOUCH_PAUSE, false);
+            }
             return;
         }
         if (surface.phase == TOUCH_DOWN && touch.enabled && touch.effective_mode == TOUCH_GAMEPLAY)

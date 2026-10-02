@@ -359,6 +359,17 @@ static bool rp5np_ly_up = false;
 static bool rp5np_ly_down = false;
 static bool rp5np_setup_context = false;
 static bool rp5np_shift_held = false;
+#ifdef __ANDROID__
+static bool rp5np_touch_shift_held = false;
+static TouchKeySources rp5np_key_sources[2]; /* Space, Escape */
+#endif
+static bool rp5np_effective_shift(void) {
+#ifdef __ANDROID__
+    return rp5np_shift_held || rp5np_touch_shift_held || (SDL_GetModState() & KMOD_SHIFT);
+#else
+    return rp5np_shift_held;
+#endif
+}
 
 #ifdef __ANDROID__
 static rp5np_text_input_handler rp5np_text_handler = NULL;
@@ -415,7 +426,7 @@ static void source_mouse_button(TouchMouseSource source, bool left, bool down) {
     ev.x = (short)MouseX; ev.y = (short)MouseY;
     ev.buttons = touch_mouse_buttons(&sourceButtons);
     ev.timestamp = mouse_get_time();
-    ev.modifiers = (rp5np_shift_held || (SDL_GetModState() & KMOD_SHIFT)) ? 1 : 0;
+    ev.modifiers = rp5np_effective_shift() ? 1 : 0;
     addingTouchEvent = source == TOUCH_MOUSE_TOUCH;
     addMouseEvent(&ev);
     addingTouchEvent = false;
@@ -490,7 +501,7 @@ static void rp5np_emit_key(SDL_Keycode kc, bool down) {
     kbs_event keyEvent = {0};
     keyEvent.code = c;
     keyEvent.state = down ? KBS_DOWN : KBS_UP;
-    keyEvent.modifiers = rp5np_shift_held ? KB_MOD_SHIFT : 0;
+    keyEvent.modifiers = rp5np_effective_shift() ? KB_MOD_SHIFT : 0;
 
     if (kc == SDLK_RETURN) keyEvent.ascii = 13;
     else if (kc == SDLK_ESCAPE) keyEvent.ascii = 27;
@@ -502,21 +513,61 @@ static void rp5np_emit_key(SDL_Keycode kc, bool down) {
     sshockKeyStates[c] = down ? (keyEvent.modifiers | KB_MOD_PRESSED) : 0;
 }
 
+static void rp5np_refresh_shift(void) {
+    bool down = rp5np_effective_shift();
+    for (int i = 0; i < 256; ++i) {
+        if (sshockKeyStates[i] != 0) {
+            if (down) sshockKeyStates[i] |= KB_MOD_SHIFT;
+            else sshockKeyStates[i] &= ~KB_MOD_SHIFT;
+        }
+    }
+}
+
 static void rp5np_set_shift(bool down) {
     if (rp5np_shift_held == down)
         return;
 
     rp5np_shift_held = down;
-    for (int i = 0; i < 256; ++i) {
-        if (sshockKeyStates[i] != 0) {
-            if (down)
-                sshockKeyStates[i] |= KB_MOD_SHIFT;
-            else
-                sshockKeyStates[i] &= ~KB_MOD_SHIFT;
-        }
-    }
+    rp5np_refresh_shift();
     SDL_Log("RP5NP_CONTROLLER_RUN_MODIFIER down=%d", down ? 1 : 0);
 }
+
+#ifdef __ANDROID__
+static void rp5np_touch_key(int index, bool down) {
+    TouchKeySources *key = &rp5np_key_sources[index];
+    if (touch_key_source(key, TOUCH_KEY_TOUCH, down))
+        rp5np_emit_key(index ? SDLK_ESCAPE : SDLK_SPACE, touch_key_held(key));
+}
+
+void touch_input_action(TouchAction action, bool down) {
+    switch (action) {
+    case TOUCH_JUMP: rp5np_touch_key(0, down); break;
+    case TOUCH_PAUSE: rp5np_touch_key(1, down); break;
+    case TOUCH_SPRINT:
+        if (rp5np_touch_shift_held != down) {
+            rp5np_touch_shift_held = down;
+            rp5np_refresh_shift();
+        }
+        break;
+    case TOUCH_CROUCH: if (down) rp5np_dispatch_action(RP5NP_CONTROLLER_ACTION_CROUCH_TOGGLE); break;
+    case TOUCH_WEAPON_PREV: if (down) rp5np_dispatch_action(RP5NP_CONTROLLER_ACTION_CYCLE_WEAPON_PREV); break;
+    case TOUCH_WEAPON_NEXT: if (down) rp5np_dispatch_action(RP5NP_CONTROLLER_ACTION_CYCLE_WEAPON_NEXT); break;
+    case TOUCH_CONSUMABLE: if (down) rp5np_dispatch_action(RP5NP_CONTROLLER_ACTION_QUICK_CONSUMABLE); break;
+    case TOUCH_EXPLOSIVE: if (down) rp5np_dispatch_action(RP5NP_CONTROLLER_ACTION_QUICK_EXPLOSIVE); break;
+    case TOUCH_TARGET_ID: if (down) rp5np_dispatch_action(RP5NP_CONTROLLER_ACTION_TARGET_ID); break;
+    default: break;
+    }
+}
+
+void touch_input_cancel_actions(void) {
+    rp5np_touch_key(0, false);
+    rp5np_touch_key(1, false);
+    if (rp5np_touch_shift_held) {
+        rp5np_touch_shift_held = false;
+        rp5np_refresh_shift();
+    }
+}
+#endif
 
 static void rp5np_axis_key(bool *state, bool active, SDL_Keycode key) {
     if (*state == active)
@@ -743,6 +794,13 @@ static void rp5np_release_controller_inputs(void) {
     rp5np_trigger_right_down = false;
 
     rp5np_set_shift(false);
+#ifdef __ANDROID__
+    for (int i = 0; i < 2; ++i) {
+        TouchKeySources *key = &rp5np_key_sources[i];
+        if (touch_key_source(key, TOUCH_KEY_CONTROLLER, false))
+            rp5np_emit_key(i ? SDLK_ESCAPE : SDLK_SPACE, touch_key_held(key));
+    }
+#endif
 }
 
 void SetMouseXY(int mx, int my);
@@ -1008,7 +1066,18 @@ void pump_events(void) {
         case SDL_KEYUP:
         case SDL_KEYDOWN: {
             uchar c = sdlKeyCodeToSSHOCKkeyCode(ev.key.keysym.sym);
-            if (c != KBC_NONE) {
+            bool other_source_held = false;
+#ifdef __ANDROID__
+            int shared_key = ev.key.keysym.sym == SDLK_SPACE ? 0 :
+                             ev.key.keysym.sym == SDLK_ESCAPE ? 1 : -1;
+            if (shared_key >= 0) {
+                TouchKeySources *key = &rp5np_key_sources[shared_key];
+                touch_key_source(key, TOUCH_KEY_PHYSICAL, ev.key.state == SDL_PRESSED);
+                other_source_held = key->source[TOUCH_KEY_TOUCH] ||
+                                    key->source[TOUCH_KEY_CONTROLLER];
+            }
+#endif
+            if (c != KBC_NONE && !other_source_held) {
                 kbs_event keyEvent = {0};
 
                 keyEvent.code = c;
@@ -1122,13 +1191,7 @@ void pump_events(void) {
             // hack to allow pressing shift after move key
             // sets all current shock states in array to shifted or non-shifted
             if (ev.key.keysym.sym == SDLK_LSHIFT || ev.key.keysym.sym == SDLK_RSHIFT) {
-                for (int i = 0; i < 256; i++)
-                    if (sshockKeyStates[i]) {
-                        if (ev.key.state == SDL_PRESSED)
-                            sshockKeyStates[i] |= KB_MOD_SHIFT;
-                        else
-                            sshockKeyStates[i] &= ~KB_MOD_SHIFT;
-                    }
+                rp5np_refresh_shift();
             }
         } break;
 
@@ -1147,6 +1210,11 @@ void pump_events(void) {
             // for every utf8 char in null-terminated string
             for (uint32_t i = 0; i < len; i++) {
                 int ch = ev.text.text[i];
+#ifdef __ANDROID__
+                if (ch == ' ' && (rp5np_key_sources[0].source[TOUCH_KEY_TOUCH] ||
+                                  rp5np_key_sources[0].source[TOUCH_KEY_CONTROLLER]))
+                    continue;
+#endif
 
                 // ignore if non-printable key
                 if (!isprint(ch))
@@ -1428,7 +1496,16 @@ void pump_events(void) {
             }
 
             if (key != SDLK_UNKNOWN) {
-                rp5np_emit_key(key, down);
+                if (key == SDLK_SPACE || key == SDLK_ESCAPE) {
+#ifdef __ANDROID__
+                    int index = key == SDLK_SPACE ? 0 : 1;
+                    TouchKeySources *sources = &rp5np_key_sources[index];
+                    if (touch_key_source(sources, TOUCH_KEY_CONTROLLER, down))
+                        rp5np_emit_key(key, touch_key_held(sources));
+#else
+                    rp5np_emit_key(key, down);
+#endif
+                } else rp5np_emit_key(key, down);
                 SDL_Log("RP5NP_CONTROLLER_BUTTON button=%d down=%d key=%d",
                         ev.cbutton.button, down ? 1 : 0, (int)key);
             }

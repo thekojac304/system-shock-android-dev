@@ -9,14 +9,20 @@
 typedef enum { TOUCH_GAMEPLAY, TOUCH_CURSOR } TouchMode;
 typedef enum {
     TOUCH_NONE, TOUCH_MOVE, TOUCH_LOOK, TOUCH_FIRE, TOUCH_USE,
-    TOUCH_CURSOR_OWNER, TOUCH_MODE_TOGGLE
+    TOUCH_CURSOR_OWNER, TOUCH_MODE_TOGGLE, TOUCH_ACTION
 } TouchRole;
+typedef enum {
+    TOUCH_JUMP, TOUCH_CROUCH, TOUCH_WEAPON_PREV, TOUCH_WEAPON_NEXT,
+    TOUCH_CONSUMABLE, TOUCH_EXPLOSIVE, TOUCH_SPRINT, TOUCH_TARGET_ID,
+    TOUCH_PAUSE, TOUCH_ACTION_COUNT
+} TouchAction;
 typedef enum { TOUCH_DOWN, TOUCH_MOTION, TOUCH_UP, TOUCH_ABORT } TouchPhase;
 #define TOUCH_TAP_MS 350u
 typedef enum {
     TOUCH_FIRE_DOWN, TOUCH_FIRE_UP, TOUCH_USE_PRESS,
     TOUCH_POINTER_DOWN, TOUCH_POINTER_MOVE, TOUCH_POINTER_UP,
-    TOUCH_MODE_CHANGED, TOUCH_CANCEL
+    TOUCH_MODE_CHANGED, TOUCH_CANCEL, TOUCH_ACTION_DOWN, TOUCH_ACTION_UP,
+    TOUCH_POINTER_TAP
 } TouchOutput;
 /* Outputs are ordered edges, not polled booleans: even a down/up between
    game polls reaches the original input queue. Cancellation invalidates them. */
@@ -26,23 +32,27 @@ typedef struct { float x, y, w, h; } TouchRect;
 typedef struct {
     float width, height, move_radius, move_split;
     TouchCircle fire, use;
+    TouchCircle action[TOUCH_ACTION_COUNT];
     TouchRect toggle;
 } TouchLayout;
 typedef struct {
     int64_t touch, finger; /* exact SDL_TouchID / SDL_FingerID values */
     bool active, owns_look;
     TouchRole role;
+    TouchAction action;
     float x, y, start_x, start_y;
     uint32_t down_ms;
     bool dragging;
 } TouchFinger;
 typedef struct {
     TouchMode mode, effective_mode;
-    bool enabled, gameplay_available, controller;
+    bool enabled, gameplay_available, pause_available, controller;
     TouchLayout layout;
     TouchFinger fingers[TOUCH_MAX_FINGERS];
     int move_owner, look_owner, cursor_owner;
     unsigned fire_count, use_count;
+    unsigned action_count[TOUCH_ACTION_COUNT];
+    bool sprint_latched;
     float anchor_x, anchor_y, movement_x, movement_y, look_x, look_y;
     float cursor_slop, look_scale;
     TouchEmit emit;
@@ -63,6 +73,17 @@ void touch_consume_look(TouchControls *t, int *dx, int *dy);
 /* Per-axis keyboard/controller precedence, at normal walking strength. */
 void touch_merge_axes(const TouchControls *t, int walk_strength, int *x, int *y);
 
+/* Raw-surface tap recognizer for movie playback. It never owns gameplay input. */
+typedef struct {
+    TouchFinger fingers[TOUCH_MAX_FINGERS];
+    unsigned active_count;
+    bool blocked, overflow;
+} TouchMovieTap;
+void touch_movie_tap_reset(TouchMovieTap *tap);
+bool touch_movie_tap_event(TouchMovieTap *tap, TouchPhase phase,
+                           int64_t device, int64_t finger, float x, float y,
+                           uint32_t timestamp_ms, float slop);
+
 /* Independent source masks: release edges occur only when the aggregate goes
    up. Bit numbering is the original Shock left=0, right=1 convention. */
 typedef enum { TOUCH_MOUSE_PHYSICAL, TOUCH_MOUSE_CONTROLLER, TOUCH_MOUSE_TOUCH } TouchMouseSource;
@@ -70,6 +91,12 @@ typedef struct { uint8_t source[3]; } TouchMouseButtons;
 uint8_t touch_mouse_buttons(const TouchMouseButtons *b);
 bool touch_mouse_button(TouchMouseButtons *b, TouchMouseSource source,
                         uint8_t bit, bool down);
+
+typedef enum { TOUCH_KEY_PHYSICAL, TOUCH_KEY_CONTROLLER, TOUCH_KEY_TOUCH } TouchKeySource;
+typedef struct { bool source[3]; } TouchKeySources;
+bool touch_key_held(const TouchKeySources *k);
+/* Returns true only when the aggregate key state changes. */
+bool touch_key_source(TouchKeySources *k, TouchKeySource source, bool down);
 
 struct SDL_Renderer;
 void touch_draw(const TouchControls *t, struct SDL_Renderer *renderer);

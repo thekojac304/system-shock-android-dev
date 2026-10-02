@@ -3,6 +3,7 @@
 #define TOUCH_SHOCK_BRIDGE_H
 #include <SDL.h>
 #include "touch_controls.h"
+#include "touch_target_types.h"
 
 void touch_bridge_init(void);
 void touch_bridge_sync(void);
@@ -18,4 +19,8 @@ void touch_bridge_draw(void);
 void touch_input_pointer(float x, float y);
 void touch_input_button(bool left, bool down);
 void touch_input_cancel(void);
+void touch_input_action(TouchAction action, bool down);
+void touch_input_cancel_actions(void);
+/* Game/UI region query in input.c, using the same UI coordinate conversion. */
+TouchCursorTarget touch_cursor_target_at(int x, int y);
 #endif

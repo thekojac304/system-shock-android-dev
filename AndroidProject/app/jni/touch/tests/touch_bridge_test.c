@@ -23,6 +23,17 @@ static int hints, releases, nx=1024, ny=768, px, py, buttons, event_count;
 static int events[32], aim_x[32], aim_y[32];
 static Uint32 flags=SDL_WINDOW_INPUT_FOCUS;
 static int center_warps, relative_off;
+static int action_down[TOUCH_ACTION_COUNT], action_up[TOUCH_ACTION_COUNT], action_cancels;
+static bool sprint_active;
+static TouchCursorTarget cursor_target;
+static bool switch_target_on_press;
+TouchCursorTarget touch_cursor_target_at(int x,int y) {(void)x; (void)y; return cursor_target;}
+void touch_input_action(TouchAction action,bool down) {
+    assert(action>=0 && action<TOUCH_ACTION_COUNT);
+    if(down) action_down[action]++; else action_up[action]++;
+    if(action==TOUCH_SPRINT) sprint_active=down;
+}
+void touch_input_cancel_actions(void) {action_cancels++; sprint_active=false;}
 int SDL_SetRelativeMouseMode(int enabled) {assert(!enabled); relative_off++; return 0;}
 void touch_surface_init(void) {}
 bool touch_surface_failed(void) {return false;}
@@ -58,6 +69,7 @@ void middleize_mouse(void) {px=512; py=384;}
 void touch_input_pointer(float x,float y) {px=(int)x; py=(int)y;}
 void touch_input_button(bool left,bool down) {
     int bit=left ? 1 : 2;
+    if (left && down && switch_target_on_press) cursor_target=TOUCH_TARGET_WORLD;
     if(down) buttons|=bit; else buttons&=~bit;
     assert(event_count<32);
     events[event_count]=down ? bit : -bit;
@@ -86,7 +98,7 @@ static void reset(void) {
     nx=1024; ny=768;
     center_warps=relative_off=0;
     touch_bridge_init(); touch_bridge_controller(false); touch_bridge_sync();
-    event_count=0;
+    event_count=0; cursor_target=TOUCH_TARGET_UI_CONTROL; switch_target_on_press=false;
 }
 static void aim_and_actions(void) {
     reset(); assert(hints>=2);
@@ -178,7 +190,132 @@ static void full_surface_and_transition(void) {
     finger(SDL_FINGERUP,9,.5f,0);
     finger(SDL_FINGERDOWN,10,.5f,1); assert(px==512 && py==767);
 }
+static void alpha2_actions(void) {
+    static const float xy[TOUCH_ACTION_COUNT][2] = {
+        {.95f,.52f},{.79f,.54f},{.55f,.78f},{.55f,.90f},
+        {.52f,.10f},{.63f,.10f},{.22f,.54f},{.73f,.10f},{.05f,.06f}
+    };
+    reset(); memset(action_down,0,sizeof(action_down));
+    memset(action_up,0,sizeof(action_up));
+    for(int a=0;a<TOUCH_ACTION_COUNT;a++) {
+        if(a==TOUCH_SPRINT) continue;
+        finger(SDL_FINGERDOWN,20+a,xy[a][0],xy[a][1]);
+        finger(SDL_FINGERUP,20+a,xy[a][0],xy[a][1]);
+        assert(action_down[a]==1 && action_up[a]==1);
+    }
+    finger(SDL_FINGERDOWN,40,.22f,.54f);
+    assert(action_down[TOUCH_SPRINT]==0);
+    finger(SDL_FINGERUP,40,.22f,.54f);
+    assert(action_down[TOUCH_SPRINT]==1 && action_up[TOUCH_SPRINT]==0);
+    finger(SDL_FINGERDOWN,41,.22f,.54f);
+    finger(SDL_FINGERUP,41,.22f,.54f);
+    assert(action_down[TOUCH_SPRINT]==1 && action_up[TOUCH_SPRINT]==1);
+    reset();
+    finger(SDL_FINGERDOWN,1,.22f,.54f); /* sprint */
+    finger(SDL_FINGERUP,1,.22f,.54f);
+    assert(sprint_active);
+    int cancelled=action_cancels;
+    lifecycle(SDL_WINDOWEVENT,SDL_WINDOWEVENT_FOCUS_LOST);
+    assert(action_cancels>cancelled && !sprint_active);
+    lifecycle(SDL_WINDOWEVENT,SDL_WINDOWEVENT_FOCUS_GAINED);
+    finger(SDL_FINGERDOWN,2,.22f,.54f);
+    finger(SDL_FINGERUP,2,.22f,.54f);
+    assert(sprint_active);
+    lifecycle(SDL_APP_WILLENTERBACKGROUND,0);
+    assert(!sprint_active);
+    lifecycle(SDL_APP_DIDENTERFOREGROUND,0);
+    lifecycle(SDL_WINDOWEVENT,SDL_WINDOWEVENT_FOCUS_GAINED);
+    finger(SDL_FINGERDOWN,5,.22f,.54f);
+    finger(SDL_FINGERUP,5,.22f,.54f);
+    assert(sprint_active);
+    cancelled=action_cancels; touch_bridge_controller(true);
+    assert(action_cancels>cancelled && !sprint_active);
+    reset(); game_paused=1; touch_bridge_sync();
+    int previous=action_down[TOUCH_PAUSE];
+    finger(SDL_FINGERDOWN,3,.05f,.06f);
+    assert(action_down[TOUCH_PAUSE]==previous+1);
+    reset(); map.cyber=1; touch_bridge_sync();
+    previous=action_down[TOUCH_PAUSE];
+    finger(SDL_FINGERDOWN,4,.05f,.06f);
+    assert(action_down[TOUCH_PAUSE]==previous);
+}
+static void cursor_regions(void) {
+    reset();
+    finger(SDL_FINGERDOWN,1,.85f,.08f); finger(SDL_FINGERUP,1,.85f,.08f);
+    cursor_target=TOUCH_TARGET_UI_CONTROL;
+    finger(SDL_FINGERDOWN,2,.5f,.5f); finger(SDL_FINGERUP,2,.5f,.5f);
+    assert(event_count==2 && events[0]==1 && events[1]==-1);
+    cursor_target=TOUCH_TARGET_WORLD; event_count=0;
+    finger(SDL_FINGERDOWN,3,.5f,.5f); finger(SDL_FINGERUP,3,.5f,.5f);
+    assert(event_count==4 && events[0]==1 && events[1]==-1 &&
+           events[2]==1 && events[3]==-1);
+    for(int i=0;i<4;i++) assert(aim_x[i]==512 && aim_y[i]==384);
+    event_count=0;
+    finger(SDL_FINGERDOWN,4,.5f,.5f);
+    finger(SDL_FINGERMOTION,4,.6f,.5f);
+    finger(SDL_FINGERUP,4,.6f,.5f);
+    assert(event_count==2 && events[0]==1 && events[1]==-1);
+    event_count=0;
+    for(int i=0;i<3;i++) {
+        finger(SDL_FINGERDOWN,10+i,.5f,.5f);
+        finger(SDL_FINGERUP,10+i,.5f,.5f);
+    }
+    assert(event_count==12 && !buttons);
+    /* Fullscreen icon: one normal press per exit, across repeated entries. */
+    cursor_target=TOUCH_TARGET_UI_CONTROL; event_count=0;
+    for(int i=0;i<3;i++) {
+        switch_target_on_press=true;
+        cursor_target=TOUCH_TARGET_UI_CONTROL;
+        finger(SDL_FINGERDOWN,30+i,.5f,.5f);
+        finger(SDL_FINGERUP,30+i,.5f,.5f);
+        assert(event_count==(i+1)*2);
+    }
+    switch_target_on_press=false;
+    /* Gump/inventory item: UI object gets the native double-click sequence. */
+    cursor_target=TOUCH_TARGET_UI_OBJECT; event_count=0;
+    finger(SDL_FINGERDOWN,40,.5f,.5f);
+    finger(SDL_FINGERMOTION,40,.503f,.503f);
+    finger(SDL_FINGERUP,40,.504f,.504f);
+    assert(event_count==4 && events[0]==1 && events[1]==-1 &&
+           events[2]==1 && events[3]==-1);
+    event_count=0;
+    finger(SDL_FINGERDOWN,41,.5f,.5f);
+    finger(SDL_FINGERMOTION,41,.6f,.5f);
+    finger(SDL_FINGERUP,41,.6f,.5f);
+    assert(event_count==2 && events[0]==1 && events[1]==-1);
+}
+static void cutscene_touch_skip(void) {
+    reset();
+    _current_loop=CUTSCENE_LOOP;
+    touch_bridge_sync();
+    int before=action_down[TOUCH_PAUSE], up=action_up[TOUCH_PAUSE];
+    finger(SDL_FINGERDOWN,50,.5f,.5f);
+    finger(SDL_FINGERMOTION,50,.503f,.503f);
+    assert(action_down[TOUCH_PAUSE]==before && !buttons && !mlook_enabled);
+    finger(SDL_FINGERUP,50,.504f,.504f);
+    assert(action_down[TOUCH_PAUSE]==before+1 && action_up[TOUCH_PAUSE]==up+1);
+    finger(SDL_FINGERUP,50,.504f,.504f); /* duplicate release */
+    assert(action_down[TOUCH_PAUSE]==before+1 && !buttons && !axes[0] && !axes[1]);
+    finger(SDL_FINGERDOWN,51,.5f,.5f);
+    finger(SDL_FINGERMOTION,51,.7f,.5f);
+    finger(SDL_FINGERUP,51,.5f,.5f);
+    assert(action_down[TOUCH_PAUSE]==before+1 && !buttons && !mlook_enabled);
+    finger(SDL_FINGERDOWN,52,.5f,.5f);
+    finger(SDL_FINGERDOWN,53,.6f,.5f);
+    finger(SDL_FINGERUP,52,.5f,.5f);
+    finger(SDL_FINGERUP,53,.6f,.5f);
+    assert(action_down[TOUCH_PAUSE]==before+1);
+    finger(SDL_FINGERDOWN,55,.5f,.5f);
+    nx++; touch_bridge_sync();
+    finger(SDL_FINGERUP,55,.5f,.5f);
+    assert(action_down[TOUCH_PAUSE]==before+1); /* resize invalidates the tap */
+    _current_loop=GAME_LOOP;
+    touch_bridge_sync();
+    finger(SDL_FINGERDOWN,54,.86f,.73f);
+    assert(buttons==2); /* gameplay FIRE still works after the movie */
+    finger(SDL_FINGERUP,54,.86f,.73f);
+}
 int main(void) {
-    aim_and_actions(); movement_and_lifecycle(); cursor_fallback(); full_surface_and_transition();
-    puts("TOUCH_BRIDGE_TESTS=PASS (4 groups, 10 lifecycle cases, surface/warp/orientation integration)"); return 0;
+    aim_and_actions(); movement_and_lifecycle(); cursor_fallback(); full_surface_and_transition(); alpha2_actions(); cursor_regions(); cutscene_touch_skip();
+    puts("TOUCH_BRIDGE_TESTS=PASS (6 groups, Alpha 2 actions, cutscene tap, lifecycle and surface integration)"); return 0;
 }

@@ -8,10 +8,12 @@
 SDL_Window *window;
 SDL_Renderer *renderer;
 bool MouseCaptured, TriggerRelMouseMode;
+void SDL_Log(const char *format, ...) {(void)format;}
 void touch_bridge_sync(void) {}
 void touch_bridge_cancel(void) {touch_input_cancel();}
 uint32_t mouse_get_time(void) {return 1;}
-SDL_Keymod SDL_GetModState(void) {return KMOD_NONE;}
+static SDL_Keymod mod_state;
+SDL_Keymod SDL_GetModState(void) {return mod_state;}
 void SDL_RenderGetLogicalSize(SDL_Renderer *r,int *w,int *h) {(void)r; *w=1024; *h=768;}
 void SDL_GetWindowSize(SDL_Window *w,int *x,int *y) {(void)w; *x=1024; *y=768;}
 Uint32 SDL_GetWindowFlags(SDL_Window *w) {(void)w; return SDL_WINDOW_INPUT_FOCUS;}
@@ -101,8 +103,28 @@ static void cursor_edges(void) {
     touch_input_button(true,false); touch_input_cancel();
     e=next(); assert(e.type==MOUSE_LUP && !e.buttons); empty();
 }
+static void sprint_sources(void) {
+    mod_state=KMOD_NONE;
+    rp5np_set_shift(false);
+    touch_input_cancel_actions();
+    sshockKeyStates[42]=KB_MOD_PRESSED;
+    touch_input_action(TOUCH_SPRINT,true);
+    assert(rp5np_effective_shift() && (sshockKeyStates[42]&KB_MOD_SHIFT));
+    rp5np_set_shift(true); /* controller L3 outlives touch */
+    touch_input_cancel_actions();
+    assert(rp5np_effective_shift() && (sshockKeyStates[42]&KB_MOD_SHIFT));
+    rp5np_set_shift(false);
+    assert(!rp5np_effective_shift() && !(sshockKeyStates[42]&KB_MOD_SHIFT));
+    mod_state=KMOD_LSHIFT; /* physical keyboard outlives touch */
+    touch_input_action(TOUCH_SPRINT,true);
+    touch_input_cancel_actions();
+    assert(rp5np_effective_shift() && (sshockKeyStates[42]&KB_MOD_SHIFT));
+    mod_state=KMOD_NONE;
+    rp5np_refresh_shift();
+    assert(!rp5np_effective_shift());
+}
 int main(void) {
     taps(); release_pending_at_cancel(); physical_survives();
-    cancel_preserves_native_queue(); queue_overflow(); cursor_edges();
+    cancel_preserves_native_queue(); queue_overflow(); cursor_edges(); sprint_sources();
     puts("TOUCH_INPUT_TESTS=PASS (6 groups, real SDL adapter including cursor edges)"); return 0;
 }

@@ -3,7 +3,8 @@ param(
     [ValidateSet('debug','qa','releaseQa','release')][string]$Variant = 'debug',
     [string]$AndroidSdk = '',
     [string]$JavaHome = $env:JAVA_HOME,
-    [string]$DepsRoot = (Join-Path (Split-Path -Parent $PSScriptRoot) '.deps')
+    [string]$DepsRoot = (Join-Path (Split-Path -Parent $PSScriptRoot) '.deps'),
+    [switch]$SkipGitCleanCheck
 )
 
 Set-StrictMode -Version Latest
@@ -18,7 +19,7 @@ if (-not $AndroidSdk) {
     elseif ($env:LOCALAPPDATA) { $AndroidSdk = Join-Path $env:LOCALAPPDATA 'Android\Sdk' }
 }
 
-& $Preflight -Variant $Variant -AndroidSdk $AndroidSdk -JavaHome $JavaHome -DepsRoot $DepsRoot
+& $Preflight -Variant $Variant -AndroidSdk $AndroidSdk -JavaHome $JavaHome -DepsRoot $DepsRoot -SkipGitCleanCheck:$SkipGitCleanCheck
 
 $Sdl = Join-Path $DepsRoot 'SDL2'
 $Mixer = Join-Path $DepsRoot 'SDL2_mixer'

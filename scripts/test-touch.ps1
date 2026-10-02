@@ -19,6 +19,12 @@ $Alpha11Exe = Join-Path $Output 'touch_alpha11_test.exe'
 if ($LASTEXITCODE -ne 0) { throw "Touch Alpha 1.1 test compilation failed: $LASTEXITCODE" }
 & $Alpha11Exe
 if ($LASTEXITCODE -ne 0) { throw "Touch Alpha 1.1 tests failed: $LASTEXITCODE" }
+$Alpha2Exe = Join-Path $Output 'touch_alpha2_test.exe'
+& $Compiler "-B$CompilerBin/" -std=c11 -Wall -Wextra -Werror -pedantic -O2 -DTOUCH_HEADLESS "-I$Touch" `
+    (Join-Path $Touch 'touch_controls.c') (Join-Path $Touch 'tests/touch_alpha2_test.c') -lm -o $Alpha2Exe
+if ($LASTEXITCODE -ne 0) { throw "Touch Alpha 2 test compilation failed: $LASTEXITCODE" }
+& $Alpha2Exe
+if ($LASTEXITCODE -ne 0) { throw "Touch Alpha 2 tests failed: $LASTEXITCODE" }
 $SurfaceExe = Join-Path $Output 'touch_surface_test.exe'
 & $Compiler "-B$CompilerBin/" -std=c11 -Wall -Wextra -Werror -pedantic -O2 -DTOUCH_HEADLESS -DDECLSPEC= -DSDL_MAIN_HANDLED `
     "-I$(Join-Path $Root '.deps/SDL2/include')" "-I$Touch" (Join-Path $Touch 'tests/touch_surface_test.c') -o $SurfaceExe
@@ -33,6 +39,13 @@ $BridgeExe = Join-Path $Output 'touch_bridge_test.exe'
 if ($LASTEXITCODE -ne 0) { throw "Touch bridge test compilation failed: $LASTEXITCODE" }
 & $BridgeExe
 if ($LASTEXITCODE -ne 0) { throw "Touch bridge tests failed: $LASTEXITCODE" }
+$TargetExe = Join-Path $Output 'touch_target_test.exe'
+& $Compiler "-B$CompilerBin/" -std=c11 -Wall -Wextra -Werror -pedantic -O2 `
+    "-I$(Join-Path $Touch 'tests/stubs')" "-I$Touch" `
+    (Join-Path $Touch 'tests/touch_target_test.c') -o $TargetExe
+if ($LASTEXITCODE -ne 0) { throw "Touch target test compilation failed: $LASTEXITCODE" }
+& $TargetExe
+if ($LASTEXITCODE -ne 0) { throw "Touch target tests failed: $LASTEXITCODE" }
 
 # Compile the real SDL queue adapter in one TU. Whole-program optimization
 # omits unrelated platform entry points, so this test needs only SDL headers.

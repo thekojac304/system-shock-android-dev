@@ -67,5 +67,7 @@ int main(void) {
     touch_draw(&t,NULL); assert(draws>0 && !fire_center_lines); restored();
     touch_configure(&t,1024,768,true,true,true); draws=0;
     touch_draw(&t,NULL); assert(!draws); restored();
-    puts("TOUCH_RENDER_TESTS=PASS (3 groups)"); return 0;
+    touch_configure(&t,1024,768,true,false,false); draws=0;
+    touch_draw(&t,NULL); assert(!draws); restored(); /* movie/menu: no overlay */
+    puts("TOUCH_RENDER_TESTS=PASS (4 groups)"); return 0;
 }

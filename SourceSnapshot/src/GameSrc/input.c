@@ -55,6 +55,10 @@ static char sbcopy[] = "Spaceball Interface Copyright 1994 Spaceball Technologie
 #include "gr2ss.h"
 #include "grenades.h"
 #include "invent.h"
+#include "mfdint.h"
+#include "mfdext.h"
+#include "mfdgump.h"
+#include "sideicon.h"
 #include "leanmetr.h"
 #include "MacTune.h"
 #include "mainloop.h"
@@ -76,6 +80,7 @@ static char sbcopy[] = "Spaceball Interface Copyright 1994 Spaceball Technologie
 #include "mouselook.h"
 #ifdef __ANDROID__
 #include "touch_shock_bridge.h"
+#include "touch_cursor_target.h"
 #endif
 
 #ifdef __ANDROID__
@@ -3362,6 +3367,43 @@ uchar toggle_profile(ushort keycode, uint32_t context, intptr_t data) {
 // ---------
 // EXTERNALS
 // ---------
+
+/* The MFD gump's original callback uses a double-click then release to pick
+   up an item. Inventory rows with a use handler likewise use LDOUBLE. */
+#ifdef __ANDROID__
+extern MFD mfd[NUM_MFDS];
+static bool touch_ui_object_region(const LGRegion *region, int x, int y) {
+    if (input_cursor_mode == INPUT_OBJECT_CURSOR) return false;
+    for (int i = 0; i < NUM_MFDS; ++i) {
+        LGRegion *mfd_region = full_game_3d ? &mfd[i].reg2 : &mfd[i].reg;
+        if (region == mfd_region &&
+            mfd_get_func(i, player_struct.mfd_current_slots[i]) == MFD_GUMP_FUNC)
+            return touch_gump_item_at(&mfd[i], x, y);
+    }
+    LGRegion *inventory = full_game_3d ? inventory_region_full : inventory_region_game;
+    return region == inventory && touch_inventory_object_at(x, y);
+}
+
+TouchCursorTarget touch_cursor_target_at(int x, int y) {
+    short ux = (short)x, uy = (short)y;
+    ss_mouse_convert(&ux, &uy, TRUE);
+    TouchCursorTarget target = touch_classify_view_region(_current_view, ux, uy,
+        touch_side_icon_at, touch_ui_object_region);
+    if (target != TOUCH_TARGET_NONE) return target;
+    /* In normal mode the MFDs and inventory are siblings of the small view. */
+    LGRegion *root = full_game_3d ? fullroot_region : root_region;
+    if (!touch_region_contains(root, ux, uy)) return TOUCH_TARGET_NONE;
+    for (int i = 0; i < NUM_MFDS; ++i) {
+        LGRegion *region = full_game_3d ? &mfd[i].reg2 : &mfd[i].reg;
+        if (touch_region_contains(region, ux, uy) && touch_ui_object_region(region, ux, uy))
+            return TOUCH_TARGET_UI_OBJECT;
+    }
+    LGRegion *inventory = full_game_3d ? inventory_region_full : inventory_region_game;
+    if (touch_region_contains(inventory, ux, uy) &&
+        touch_ui_object_region(inventory, ux, uy)) return TOUCH_TARGET_UI_OBJECT;
+    return TOUCH_TARGET_UI_CONTROL;
+}
+#endif
 
 void install_motion_mouse_handler(LGRegion *r, frc *fr) {
     int cid;

@@ -56,17 +56,17 @@ static void taps(void) {
     finger(TOUCH_DOWN,1,600,400,100); assert(count==1 && events[0].type==TOUCH_POINTER_MOVE);
     finger(TOUCH_MOTION,1,603,397,130); assert(count==1);
     finger(TOUCH_UP,1,604,403,180);
-    assert(count==3 && events[1].type==TOUCH_POINTER_DOWN && events[2].type==TOUCH_POINTER_UP);
-    near(events[1].x,600); near(events[2].y,400);
-    /* No double-click synthesis/filtering: two short taps retain both pairs. */
+    assert(count==2 && events[1].type==TOUCH_POINTER_TAP);
+    near(events[1].x,600); near(events[1].y,400);
+    /* Region-specific click synthesis happens in the bridge. */
     finger(TOUCH_DOWN,2,600,400,220); finger(TOUCH_UP,2,600,400,270);
-    assert(count==6 && events[4].type==TOUCH_POINTER_DOWN && events[5].type==TOUCH_POINTER_UP);
+    assert(count==4 && events[3].type==TOUCH_POINTER_TAP);
     reset(true); finger(TOUCH_DOWN,1,600,400,100);
     finger(TOUCH_UP,1,600,400,100+TOUCH_TAP_MS+1); assert(count==1);
     reset(true); finger(TOUCH_DOWN,1,600,400,UINT32_MAX-50);
-    finger(TOUCH_UP,1,600,400,20); assert(count==3); /* timestamp wrap */
+    finger(TOUCH_UP,1,600,400,20); assert(count==2); /* timestamp wrap */
     reset(true); finger(TOUCH_DOWN,1,600,400,0);
-    finger(TOUCH_UP,1,600+t.cursor_slop,400,TOUCH_TAP_MS); assert(count==3);
+    finger(TOUCH_UP,1,600+t.cursor_slop,400,TOUCH_TAP_MS); assert(count==2);
 }
 static void drags(void) {
     reset(true); finger(TOUCH_DOWN,1,600,400,100);

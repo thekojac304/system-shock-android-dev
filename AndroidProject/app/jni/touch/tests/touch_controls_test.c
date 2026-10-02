@@ -158,8 +158,24 @@ static void mouse_source_ownership(void) {
         assert(touch_mouse_button(&b,(TouchMouseSource)other,(uint8_t)bit,false));
     }
 }
+static void key_source_ownership(void) {
+    for (int other=TOUCH_KEY_PHYSICAL; other<=TOUCH_KEY_CONTROLLER; ++other) {
+        TouchKeySources key={{false,false,false}};
+        assert(touch_key_source(&key,(TouchKeySource)other,true));
+        assert(!touch_key_source(&key,TOUCH_KEY_TOUCH,true));
+        assert(!touch_key_source(&key,TOUCH_KEY_TOUCH,false));
+        assert(touch_key_held(&key));
+        assert(touch_key_source(&key,(TouchKeySource)other,false));
+        assert(!touch_key_held(&key));
+        assert(touch_key_source(&key,TOUCH_KEY_TOUCH,true));
+        assert(!touch_key_source(&key,(TouchKeySource)other,true));
+        assert(!touch_key_source(&key,TOUCH_KEY_TOUCH,false));
+        assert(touch_key_held(&key));
+        assert(touch_key_source(&key,(TouchKeySource)other,false));
+    }
+}
 int main(void) {
     movement(); look_and_identity(); multitouch_fire_drag(); look_not_stolen();
-    tap_edges(); cursor_and_toggle(); cancellation(); overflow_and_duplicates(); mouse_source_ownership();
-    puts("TOUCH_CONTROLS_TESTS=PASS (9 groups)"); return 0;
+    tap_edges(); cursor_and_toggle(); cancellation(); overflow_and_duplicates(); mouse_source_ownership(); key_source_ownership();
+    puts("TOUCH_CONTROLS_TESTS=PASS (10 groups)"); return 0;
 }
