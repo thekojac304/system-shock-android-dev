@@ -26,6 +26,9 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "kb.h"
 #include "mouse.h"
 #include "sdl_events.h"
+#ifdef __ANDROID__
+#include "touch_shock_bridge.h"
+#endif
 #include <stdlib.h>
 #include <SDL.h>
 #include <OpenGL.h>
@@ -68,6 +71,14 @@ static void addKBevent(const kbs_event *ev) {
 // same for mouse events, also created in pump_events(), consumed by mouse_next()
 static ss_mouse_event mouseEvents[kNumMouseEvents];
 static int nextMouseEvent = 0;
+#ifdef __ANDROID__
+static TouchMouseButtons sourceButtons;
+static bool addingTouchEvent;
+static uchar touchNeedsRelease;
+static uchar deliveredMouseButtons;
+static bool mouseEventIsTouch[kNumMouseEvents];
+static uchar mouseEventOtherButtons[kNumMouseEvents];
+#endif
 
 // latest mouse state as input for MousePollProc() in mouse.c
 ss_mouse_event latestMouseEvent;
@@ -76,12 +87,24 @@ static void addMouseEvent(const ss_mouse_event *ev) {
     latestMouseEvent = *ev;
 
     if (nextMouseEvent < kNumMouseEvents) {
+#ifdef __ANDROID__
+        mouseEventIsTouch[nextMouseEvent] = addingTouchEvent;
+        mouseEventOtherButtons[nextMouseEvent] = sourceButtons.source[TOUCH_MOUSE_PHYSICAL] |
+                                                sourceButtons.source[TOUCH_MOUSE_CONTROLLER];
+#endif
         mouseEvents[nextMouseEvent] = latestMouseEvent;
         ++nextMouseEvent;
     } else {
         // printf("WTF, the mouseEvents queue is full?!");
         // drop the oldest event
         memmove(&mouseEvents[0], &mouseEvents[1], sizeof(ss_mouse_event) * (kNumMouseEvents - 1));
+#ifdef __ANDROID__
+        memmove(mouseEventIsTouch, mouseEventIsTouch + 1, sizeof(bool) * (kNumMouseEvents - 1));
+        memmove(mouseEventOtherButtons, mouseEventOtherButtons + 1, kNumMouseEvents - 1);
+        mouseEventIsTouch[kNumMouseEvents - 1] = addingTouchEvent;
+        mouseEventOtherButtons[kNumMouseEvents - 1] = sourceButtons.source[TOUCH_MOUSE_PHYSICAL] |
+                                                    sourceButtons.source[TOUCH_MOUSE_CONTROLLER];
+#endif
         mouseEvents[kNumMouseEvents - 1] = latestMouseEvent;
     }
 }
@@ -380,6 +403,85 @@ int MouseY;
 int MouseChaosX;
 int MouseChaosY;
 
+#ifdef __ANDROID__
+void SetMouseXY(int mx, int my);
+
+static void source_mouse_button(TouchMouseSource source, bool left, bool down) {
+    const uchar bit = (uchar)(1u << (left ? MOUSE_LBUTTON : MOUSE_RBUTTON));
+    if (!touch_mouse_button(&sourceButtons, source, bit, down)) return;
+    if (source == TOUCH_MOUSE_TOUCH && down) touchNeedsRelease |= bit;
+    ss_mouse_event ev = {0};
+    ev.type = left ? (down ? MOUSE_LDOWN : MOUSE_LUP) : (down ? MOUSE_RDOWN : MOUSE_RUP);
+    ev.x = (short)MouseX; ev.y = (short)MouseY;
+    ev.buttons = touch_mouse_buttons(&sourceButtons);
+    ev.timestamp = mouse_get_time();
+    ev.modifiers = (rp5np_shift_held || (SDL_GetModState() & KMOD_SHIFT)) ? 1 : 0;
+    addingTouchEvent = source == TOUCH_MOUSE_TOUCH;
+    addMouseEvent(&ev);
+    addingTouchEvent = false;
+}
+
+void touch_input_button(bool left, bool down) {
+    source_mouse_button(TOUCH_MOUSE_TOUCH, left, down);
+}
+
+void touch_input_pointer(float x, float y) {
+    /* Clamp the far edge to the last logical pixel, just like real mouse input. */
+    int w, h;
+    SDL_RenderGetLogicalSize(renderer, &w, &h);
+    /* Already game-logical: SetMouseXY's window-space bounds are unsuitable
+       here, especially on letterboxed/portrait surfaces. Physical input keeps
+       its existing SetMouseXY path. */
+    MouseX = (int)SDL_clamp(x, 0, w-1);
+    MouseY = (int)SDL_clamp(y, 0, h-1);
+    ss_mouse_event ev = {0};
+    ev.type = MOUSE_MOTION;
+    ev.x = (short)MouseX; ev.y = (short)MouseY;
+    ev.buttons = touch_mouse_buttons(&sourceButtons);
+    ev.timestamp = mouse_get_time();
+    addingTouchEvent = true;
+    addMouseEvent(&ev);
+    addingTouchEvent = false;
+}
+
+void touch_input_cancel(void) {
+    /* Remove only unconsumed touch edges. Keep keyboard and native mouse /
+       controller events, stripping their historical touch-held button bits. */
+    int count = 0;
+    for (int i = 0; i < nextMouseEvent; ++i) {
+        if (mouseEventIsTouch[i]) continue;
+        mouseEvents[count] = mouseEvents[i];
+        mouseEvents[count].buttons = mouseEventOtherButtons[i];
+        mouseEventIsTouch[count] = false;
+        mouseEventOtherButtons[count++] = mouseEventOtherButtons[i];
+    }
+    nextMouseEvent = count;
+    /* Cleanup edges are retained across repeated lifecycle cancellations. */
+    /* A finger may already be up while its queued release has not reached
+       the game. Keep cleanup responsibility until that release is consumed. */
+    uchar held = sourceButtons.source[TOUCH_MOUSE_TOUCH] | touchNeedsRelease;
+    touchNeedsRelease = 0;
+    sourceButtons.source[TOUCH_MOUSE_TOUCH] = 0;
+    uchar remaining = touch_mouse_buttons(&sourceButtons);
+    uchar projected = count ? mouseEvents[count - 1].buttons : deliveredMouseButtons;
+    for (int button = 0; button < 2; ++button) {
+        uchar bit = (uchar)(1u << button);
+        bool down = (remaining & bit) != 0;
+        if ((held & bit) && (!down || !(projected & bit))) {
+            ss_mouse_event ev = {0};
+            /* If physical input overlapped an unconsumed touch press, retain
+               that physical press even though its touch queue entry vanished. */
+            ev.type = button == MOUSE_LBUTTON ? (down ? MOUSE_LDOWN : MOUSE_LUP)
+                                              : (down ? MOUSE_RDOWN : MOUSE_RUP);
+            ev.x = (short)MouseX; ev.y = (short)MouseY;
+            ev.buttons = remaining; ev.timestamp = mouse_get_time();
+            addMouseEvent(&ev);
+        }
+    }
+    latestMouseEvent.buttons = remaining;
+}
+#endif
+
 static void rp5np_emit_key(SDL_Keycode kc, bool down) {
     uchar c = sdlKeyCodeToSSHOCKkeyCode(kc);
     if (c == KBC_NONE)
@@ -535,6 +637,7 @@ static void rp5np_open_controller(int device_index) {
     rp5np_validate_controller(rp5np_controller);
 #ifdef __ANDROID__
     SDL_Log("RP5NP_CONTROLLER_PROFILE=RP5_REMAKE_V1");
+    touch_bridge_controller(true);
 #endif
 }
 
@@ -586,6 +689,9 @@ static void rp5np_emit_mouse_button(bool left_button, bool down) {
     else
         rp5np_mouse_buttons &= (uchar)~bit;
 
+#ifdef __ANDROID__
+    source_mouse_button(TOUCH_MOUSE_CONTROLLER, left_button, down);
+#else
     ss_mouse_event mouseEvent = {0};
     mouseEvent.type = left_button ? (down ? MOUSE_LDOWN : MOUSE_LUP)
                                   : (down ? MOUSE_RDOWN : MOUSE_RUP);
@@ -595,6 +701,7 @@ static void rp5np_emit_mouse_button(bool left_button, bool down) {
     mouseEvent.timestamp = mouse_get_time();
     mouseEvent.modifiers = rp5np_shift_held ? 1 : 0;
     addMouseEvent(&mouseEvent);
+#endif
     SDL_Log("RP5NP_CONTROLLER_MOUSE_BUTTON button=%s down=%d",
             left_button ? "LEFT" : "RIGHT", down ? 1 : 0);
 }
@@ -722,6 +829,9 @@ static void rp5np_apply_right_stick(void) {
     mouseEvent.x = (short)MouseX;
     mouseEvent.y = (short)MouseY;
     mouseEvent.buttons = rp5np_mouse_buttons;
+#ifdef __ANDROID__
+    mouseEvent.buttons = touch_mouse_buttons(&sourceButtons);
+#endif
     mouseEvent.timestamp = mouse_get_time();
     mouseEvent.modifiers = rp5np_shift_held ? 1 : 0;
     addMouseEvent(&mouseEvent);
@@ -880,9 +990,13 @@ void pump_events(void) {
 
 #ifdef __ANDROID__
     rp5np_open_first_controller();
+    touch_bridge_sync();
 #endif
 
     while (SDL_PollEvent(&ev)) {
+#ifdef __ANDROID__
+        touch_bridge_event(&ev);
+#endif
         switch (ev.type) {
         case SDL_QUIT:
             // a bit hacky at this place, but this would allow exiting the game via the window's [x] button
@@ -1077,6 +1191,12 @@ void pump_events(void) {
 
         case SDL_MOUSEBUTTONDOWN:
         case SDL_MOUSEBUTTONUP: {
+#ifdef __ANDROID__
+            if (ev.button.which == SDL_TOUCH_MOUSEID) break;
+            if (ev.button.button == SDL_BUTTON_LEFT || ev.button.button == SDL_BUTTON_RIGHT)
+                source_mouse_button(TOUCH_MOUSE_PHYSICAL, ev.button.button == SDL_BUTTON_LEFT,
+                                    ev.button.state == SDL_PRESSED);
+#else
             bool down = (ev.button.state == SDL_PRESSED);
             ss_mouse_event mouseEvent = {0};
             mouseEvent.type = 0;
@@ -1110,9 +1230,13 @@ void pump_events(void) {
                 mouseEvent.modifiers = (shifted ? 1 : 0);
                 addMouseEvent(&mouseEvent);
             }
+#endif
         } break;
 
         case SDL_MOUSEMOTION: {
+#ifdef __ANDROID__
+            if (ev.motion.which == SDL_TOUCH_MOUSEID) break;
+#endif
             // call this first; it sets MouseX and MouseY
             if (SDL_GetRelativeMouseMode() == SDL_TRUE)
                 SetMouseXY(MouseX + ev.motion.xrel, MouseY + ev.motion.yrel);
@@ -1128,6 +1252,10 @@ void pump_events(void) {
                 mouseEvent.buttons |= (1 << MOUSE_LBUTTON);
             if (ev.motion.state & SDL_BUTTON_RMASK)
                 mouseEvent.buttons |= (1 << MOUSE_RBUTTON);
+#ifdef __ANDROID__
+            sourceButtons.source[TOUCH_MOUSE_PHYSICAL] = mouseEvent.buttons;
+            mouseEvent.buttons = touch_mouse_buttons(&sourceButtons);
+#endif
             mouseEvent.timestamp = mouse_get_time();
             addMouseEvent(&mouseEvent);
 
@@ -1148,6 +1276,9 @@ void pump_events(void) {
                 mouseEvent.x = MouseX;
                 mouseEvent.y = MouseY;
                 mouseEvent.buttons = 0;
+#ifdef __ANDROID__
+                mouseEvent.buttons = touch_mouse_buttons(&sourceButtons);
+#endif
                 mouseEvent.timestamp = mouse_get_time();
                 addMouseEvent(&mouseEvent);
             }
@@ -1155,6 +1286,9 @@ void pump_events(void) {
 
         case SDL_CONTROLLERDEVICEADDED:
             rp5np_open_controller(ev.cdevice.which);
+#ifdef __ANDROID__
+            touch_bridge_controller(rp5np_controller != NULL);
+#endif
             break;
 
         case SDL_CONTROLLERDEVICEREMOVED:
@@ -1166,6 +1300,9 @@ void pump_events(void) {
                 rp5np_controller_instance = -1;
                 rp5np_open_first_controller();
             }
+#ifdef __ANDROID__
+            touch_bridge_controller(rp5np_controller != NULL);
+#endif
             break;
 
         case SDL_CONTROLLERBUTTONDOWN:
@@ -1519,13 +1656,30 @@ uchar kb_state(uchar code) {
 uchar btn_left = FALSE;
 uchar btn_right = FALSE;
 errtype mouse_next(ss_mouse_event *res) {
+#ifdef __ANDROID__
+    /* UI handlers can enter a modal context while draining this very queue. */
+    touch_bridge_sync();
+#endif
     if (nextMouseEvent <= 0)
         return ERR_DUNDERFLOW;
 
     *res = mouseEvents[0];
+#ifdef __ANDROID__
+    deliveredMouseButtons = res->buttons;
+    if (mouseEventIsTouch[0]) {
+        if (res->type & MOUSE_LDOWN) touchNeedsRelease |= 1u << MOUSE_LBUTTON;
+        if (res->type & MOUSE_RDOWN) touchNeedsRelease |= 1u << MOUSE_RBUTTON;
+    }
+    if (res->type & MOUSE_LUP) touchNeedsRelease &= (uchar)~(1u << MOUSE_LBUTTON);
+    if (res->type & MOUSE_RUP) touchNeedsRelease &= (uchar)~(1u << MOUSE_RBUTTON);
+#endif
 
     --nextMouseEvent;
     memmove(&mouseEvents[0], &mouseEvents[1], sizeof(ss_mouse_event) * (kNumMouseEvents - 1));
+#ifdef __ANDROID__
+    memmove(mouseEventIsTouch, mouseEventIsTouch + 1, sizeof(bool) * (kNumMouseEvents - 1));
+    memmove(mouseEventOtherButtons, mouseEventOtherButtons + 1, kNumMouseEvents - 1);
+#endif
 
     return OK;
 }
@@ -1535,6 +1689,10 @@ errtype mouse_flush(void) {
     //   Spew(DSRC_MOUSE_Flush,("Entering mouse_flush()\n"));
     // mouseQueueIn = mouseQueueOut = 0;
     nextMouseEvent = 0;
+#ifdef __ANDROID__
+    /* uiFlush may discard a queued release after the press reached gameplay. */
+    touch_bridge_cancel();
+#endif
     // TODO: anything else?
     return OK;
 }
@@ -1565,6 +1723,12 @@ void get_mouselook_vel(int *vx, int *vy) {
         *vy += MouseChaosY;
         MouseChaosY = 0;
     }
+#ifdef __ANDROID__
+    int touch_x, touch_y;
+    touch_bridge_consume_look(&touch_x, &touch_y);
+    *vx += touch_x;
+    *vy += touch_y;
+#endif
 }
 
 errtype mouse_put_xy(short x, short y) {

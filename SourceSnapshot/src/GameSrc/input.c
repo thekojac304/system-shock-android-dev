@@ -74,6 +74,9 @@ static char sbcopy[] = "Spaceball Interface Copyright 1994 Spaceball Technologie
 #include "tools.h"
 #include "weapons.h"
 #include "mouselook.h"
+#ifdef __ANDROID__
+#include "touch_shock_bridge.h"
+#endif
 
 #ifdef __ANDROID__
 #include "hkeyfunc.h"
@@ -358,6 +361,9 @@ uchar citadel_check_input(void) {
 }
 
 void input_chk(void) {
+#ifdef __ANDROID__
+    touch_bridge_sync();
+#endif
     setup_motion_polling();
     view3d_got_event = FALSE;
     uiPoll();
@@ -395,6 +401,9 @@ void input_chk(void) {
           joystick_chk();
     */
     process_motion_keys();
+#ifdef __ANDROID__
+    touch_bridge_merge_movement();
+#endif
     handle_keyboard_fatigue();
 }
 

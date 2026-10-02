@@ -1,0 +1,21 @@
+/* Touch Alpha 1. SPDX-License-Identifier: GPL-3.0-or-later */
+#ifndef TOUCH_SHOCK_BRIDGE_H
+#define TOUCH_SHOCK_BRIDGE_H
+#include <SDL.h>
+#include "touch_controls.h"
+
+void touch_bridge_init(void);
+void touch_bridge_sync(void);
+void touch_bridge_event(const SDL_Event *event);
+void touch_bridge_controller(bool connected);
+void touch_bridge_cancel(void);
+void touch_bridge_merge_movement(void);
+void touch_bridge_consume_look(int *dx, int *dy);
+void touch_bridge_draw(void);
+
+/* INPUT_LIB implements only mouse-queue mechanics; the bridge owns game
+   context/aim/mode decisions. No gameplay actions are called from INPUT_LIB. */
+void touch_input_pointer(float x, float y);
+void touch_input_button(bool left, bool down);
+void touch_input_cancel(void);
+#endif

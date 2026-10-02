@@ -31,6 +31,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <SDL.h>
 #ifdef __ANDROID__
 #include <SDL_system.h>
+#include "touch_shock_bridge.h"
 #include <unistd.h>
 #endif
 #include "InitMac.h"
@@ -173,6 +174,7 @@ bool CheckArgument(char *arg) {
 
 void InitSDL() {
 #ifdef __ANDROID__
+    touch_bridge_init();
     SDL_Log("RP5NP_NATIVE_INITSDL_BEGIN");
 #endif
     SDL_SetHint(SDL_HINT_NO_SIGNAL_HANDLERS, "1");
@@ -401,6 +403,10 @@ void SDLDraw() {
     SDL_RenderCopy(renderer, texture, &srcRect, NULL);
     SDL_DestroyTexture(texture);
 
+    // Touch overlay uses the full output surface and restores game render state.
+#ifdef __ANDROID__
+    touch_bridge_draw();
+#endif
     // Show everything we've drawn
     SDL_RenderPresent(renderer);
 }

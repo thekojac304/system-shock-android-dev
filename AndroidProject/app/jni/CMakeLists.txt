@@ -49,3 +49,10 @@ set(ENABLE_OPENGL OFF CACHE BOOL "" FORCE)
 set(ENABLE_EXAMPLES OFF CACHE BOOL "" FORCE)
 
 add_subdirectory("${RP5NP_SHOCKOLATE_SOURCE_DIR}" s)
+
+# Android-only touch adapter. Keep gestures and the Shock bridge outside the
+# preserved engine source tree; its three consumers only see this narrow API.
+target_sources(main PRIVATE touch/touch_controls.c touch/touch_shock_bridge.c touch/touch_surface.c)
+foreach(touch_consumer main GAME_LIB INPUT_LIB)
+    target_include_directories(${touch_consumer} PRIVATE "${CMAKE_CURRENT_LIST_DIR}/touch")
+endforeach()
