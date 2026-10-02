@@ -6,7 +6,7 @@ $CompilerBin = Split-Path -Parent (Get-Command $Compiler -ErrorAction Stop).Sour
 $env:PATH = "$CompilerBin;$env:PATH"
 $Root = Split-Path -Parent $PSScriptRoot
 $Touch = Join-Path $Root 'AndroidProject/app/jni/touch'
-$Core = @((Join-Path $Touch 'touch_controls.c'), (Join-Path $Touch 'touch_settings.c'), (Join-Path $Touch 'touch_editor.c'))
+$Core = @((Join-Path $Touch 'touch_controls.c'), (Join-Path $Touch 'touch_settings.c'), (Join-Path $Touch 'touch_editor.c'), (Join-Path $Touch 'touch_radial.c'))
 $Output = Join-Path $Root 'dist/touch-tests'
 New-Item -ItemType Directory -Force -Path $Output | Out-Null
 $Exe = Join-Path $Output 'touch_controls_test.exe'
@@ -47,6 +47,12 @@ $Alpha3Exe = Join-Path $Output 'touch_alpha3_test.exe'
 if ($LASTEXITCODE -ne 0) { throw "Touch Alpha 3 compilation failed: $LASTEXITCODE" }
 & $Alpha3Exe (Join-Path $Output 'settings-test.cfg')
 if ($LASTEXITCODE -ne 0) { throw "Touch Alpha 3 tests failed: $LASTEXITCODE" }
+$Alpha4Exe = Join-Path $Output 'touch_alpha4_test.exe'
+& $Compiler "-B$CompilerBin/" -std=c11 -Wall -Wextra -Werror -pedantic -O2 -DTOUCH_HEADLESS "-I$Touch" `
+    @Core (Join-Path $Touch 'tests/touch_alpha4_test.c') -lm -o $Alpha4Exe
+if ($LASTEXITCODE -ne 0) { throw "Touch Alpha 4 compilation failed: $LASTEXITCODE" }
+& $Alpha4Exe (Join-Path $Output 'settings-alpha4.cfg')
+if ($LASTEXITCODE -ne 0) { throw "Touch Alpha 4 tests failed: $LASTEXITCODE" }
 $TargetExe = Join-Path $Output 'touch_target_test.exe'
 & $Compiler "-B$CompilerBin/" -std=c11 -Wall -Wextra -Werror -pedantic -O2 `
     "-I$(Join-Path $Touch 'tests/stubs')" "-I$Touch" `

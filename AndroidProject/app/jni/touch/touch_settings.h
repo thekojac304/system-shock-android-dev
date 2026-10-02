@@ -2,7 +2,7 @@
 #ifndef TOUCH_SETTINGS_H
 #define TOUCH_SETTINGS_H
 #include <stdbool.h>
-#define TOUCH_SETTINGS_VERSION 2
+#define TOUCH_SETTINGS_VERSION 3
 #define TOUCH_SCALE_MIN .6f
 #define TOUCH_SCALE_MAX 1.8f
 #define TOUCH_OPACITY_MIN .25f
@@ -18,6 +18,9 @@ typedef struct {
     unsigned version;
     float opacity, sensitivity_x, sensitivity_y;
     bool invert_y;
+    bool haptics_enabled;
+    unsigned haptic_strength; /* 1..3; default 1 (subtle) */
+    bool wheel_enabled[3]; /* weapon, consumable, explosive */
     /* TC_STICK.scale is the single stick-size value used by both UIs. */
     TouchPlacement control[TC_COUNT];
 } TouchSettings;

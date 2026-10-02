@@ -84,7 +84,8 @@ int main(int argc,char **argv) {
     touch_draw(&t,NULL); assert(!draws); restored(); /* movie/menu: no overlay */
     touch_configure(&t,1920,960,true,true,false);
     t.settings.opacity=.25f; max_alpha=0;
-    touch_draw(&t,NULL); assert(max_alpha<=64); restored();
+    /* Low-opacity controls retain readable labels at a 60% alpha floor. */
+    touch_draw(&t,NULL); assert(max_alpha>=140 && max_alpha<=150); restored();
     touch_ui_open(&t); max_alpha=0;
     touch_draw(&t,NULL); assert(max_alpha==255); restored(); /* panel remains readable */
     touch_ui_action(&t,TU_EDIT); t.selected=TC_FIRE; draws=fire_center_lines=0;
@@ -93,15 +94,23 @@ int main(int argc,char **argv) {
     touch_ui_action(&t,TU_DOCK);
     touch_draw(&t,NULL); restored();
     if (argc==2) {
-        static const char *names[]={"gameplay","settings","editor-center","editor-top"};
-        for (int i=0;i<4;i++) {
+        static const char *names[]={"gameplay","settings","editor-center","editor-top","radial","options"};
+        for (int i=0;i<6;i++) {
             char filename[1024];
             snprintf(filename,sizeof(filename),"%s-%s.jsonl",argv[1],names[i]);
             capture=fopen(filename,"wb"); assert(capture);
             touch_init(&t,NULL,NULL); touch_configure(&t,1920,960,true,true,false);
-            if (i>0) touch_ui_open(&t);
-            if (i>1) touch_ui_action(&t,TU_EDIT);
-            if (i>2) touch_ui_action(&t,TU_DOCK);
+            if (i>0 && i<4) touch_ui_open(&t);
+            if (i>1 && i<4) touch_ui_action(&t,TU_EDIT);
+            if (i==3) touch_ui_action(&t,TU_DOCK);
+            if (i==5) { touch_ui_open(&t); touch_ui_action(&t,TU_PAGE); }
+            if (i==4) {
+                TouchRadialEntry entries[3]={{.id=1,.label="PISTOL",.available=true,.current=true},
+                    {.id=2,.label="SPARQ",.available=true},
+                    {.id=3,.label="RIFLE",.available=false}};
+                assert(touch_radial_open(&t.radial,0,TOUCH_RADIAL_WEAPON,1920,960,entries,3));
+                touch_radial_highlight(&t.radial,0,t.radial.cx,t.radial.cy-t.radial.outer_radius*.7f);
+            }
             touch_draw(&t,NULL); restored();
             fclose(capture); capture=NULL;
         }

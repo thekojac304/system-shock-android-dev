@@ -768,6 +768,12 @@ out:
     return retval;
 }
 
+uchar touch_select_weapon_slot(int slot) {
+    if (slot<0 || slot>=NUM_WEAPON_SLOTS ||
+        player_struct.weapons[slot].type==EMPTY_WEAPON_SLOT) return FALSE;
+    return inventory_select_weapon(NULL,slot);
+}
+
 uchar weapon_use_func(inv_display *dp, int w) {
     if (player_struct.weapons[w].type == EMPTY_WEAPON_SLOT)
         return FALSE;

@@ -56,7 +56,7 @@ static void persistence(void) {
     near(b.control[TC_STICK].scale,1.4f); near(b.control[TC_FIRE].x,.86f);
     assert(b.invert_y && b.version==TOUCH_SETTINGS_VERSION);
     fixture("version=2\nopacity=nan\nsensitivity_x=100\nsensitivity_y=-2\ninvert_y=7\nfire.x=inf\nfire.y=-4\nuse.scale=99\nfire.scale=garbage\n");
-    assert(touch_settings_load(&b,path)==TOUCH_LOAD_OK);
+    assert(touch_settings_load(&b,path)==TOUCH_LOAD_MIGRATED);
     near(b.opacity,1); near(b.sensitivity_x,3); near(b.sensitivity_y,.25f);
     near(b.control[TC_FIRE].x,.86f); near(b.control[TC_FIRE].y,0);
     near(b.control[TC_FIRE].scale,1); near(b.control[TC_USE].scale,1.8f); assert(!b.invert_y);

@@ -88,6 +88,8 @@ void absorb_object_on_cursor(ushort keycode, uint32_t context, intptr_t data);
 bool touch_inventory_object_at(int x, int y);
 
 uchar cycle_weapons_func(ushort keycode, uint32_t context, intptr_t data);
+/* Touch radial uses the same validated path as inventory and weapon cycling. */
+uchar touch_select_weapon_slot(int slot);
 
 void push_live_grenade_cursor(ObjID obj);
 

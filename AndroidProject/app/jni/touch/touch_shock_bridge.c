@@ -8,6 +8,10 @@
 #include "input.h"
 #include <stddef.h>
 #include <stdio.h>
+#if defined(__ANDROID__) && !defined(TOUCH_HEADLESS)
+#include <jni.h>
+#include <SDL_system.h>
+#endif
 
 extern SDL_Window *window;
 extern SDL_Renderer *renderer;
@@ -32,6 +36,30 @@ static float game_scale_x, game_scale_y;
 static int game_width, game_height;
 static bool settings_loaded, future_settings;
 static char settings_path[1024];
+
+static int populate_radial(void *user, TouchRadialCategory category,
+                           TouchRadialEntry entries[TOUCH_RADIAL_MAX_ENTRIES]) {
+    (void)user;
+    return touch_game_radial_snapshot(category,entries);
+}
+static void platform_haptic(int level) {
+#if defined(__ANDROID__) && !defined(TOUCH_HEADLESS)
+    JNIEnv *env=(JNIEnv *)SDL_AndroidGetJNIEnv();
+    jobject activity=(jobject)SDL_AndroidGetActivity();
+    if (!env || !activity) return;
+    jclass cls=(*env)->GetObjectClass(env,activity);
+    if (cls) {
+        jmethodID method=(*env)->GetMethodID(env,cls,"touchHaptic","(II)V");
+        if (method) (*env)->CallVoidMethod(env,activity,method,
+                                          (jint)touch.settings.haptic_strength,(jint)level);
+        if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
+        (*env)->DeleteLocalRef(env,cls);
+    }
+    (*env)->DeleteLocalRef(env,activity);
+#else
+    (void)level;
+#endif
+}
 
 static void load_settings(void) {
     if (settings_loaded) return;
@@ -145,6 +173,16 @@ static void output(void *user, TouchOutput event, float x, float y) {
     case TOUCH_ACTION_UP:
         touch_input_action((TouchAction)(int)x, event == TOUCH_ACTION_DOWN);
         break;
+    case TOUCH_RADIAL_SELECT:
+        if (touch.enabled && touch.gameplay_available && !touch.controller &&
+            touch.panel==TOUCH_UI_CLOSED && touch.effective_mode==TOUCH_GAMEPLAY)
+            touch_game_radial_select((TouchRadialCategory)(int)x,(int)y);
+        break;
+    case TOUCH_HAPTIC:
+        if (touch.enabled && touch.gameplay_available && !touch.controller &&
+            !background && !unfocused && touch.panel==TOUCH_UI_CLOSED &&
+            touch.settings.haptics_enabled) platform_haptic((int)x);
+        break;
     case TOUCH_MODE_CHANGED:
         request_mode(touch.effective_mode == TOUCH_GAMEPLAY);
         break;
@@ -210,6 +248,7 @@ void touch_bridge_init(void) {
     SDL_SetHintWithPriority(SDL_HINT_TOUCH_MOUSE_EVENTS, "0", SDL_HINT_OVERRIDE);
     SDL_SetHintWithPriority(SDL_HINT_MOUSE_TOUCH_EVENTS, "0", SDL_HINT_OVERRIDE);
     touch_init(&touch, output, NULL);
+    touch.radial_populate=populate_radial;
     settings_loaded=future_settings=false;
     settings_path[0]=0;
     touch_movie_tap_reset(&movie_tap);
@@ -285,6 +324,12 @@ void touch_bridge_sync(void) {
     if (movie != movie_tap_enabled) touch_movie_tap_reset(&movie_tap);
     movie_tap_enabled = movie;
     touch_configure(&touch, (float)ow, (float)oh, enabled, available, controller_connected);
+    touch_tick(&touch,SDL_GetTicks());
+    if (touch.radial.open) {
+        TouchRadialEntry fresh[TOUCH_RADIAL_MAX_ENTRIES]={{0}};
+        int count=touch_game_radial_snapshot(touch.radial.category,fresh);
+        touch_radial_refresh(&touch.radial,fresh,count);
+    }
     touch.pause_available = global_fullmap && !global_fullmap->cyber &&
         (_current_loop == GAME_LOOP || _current_loop == FULLSCREEN_LOOP || _current_loop == SVGA_LOOP) &&
         !(_change_flag & GL_CHG_LOOP) && !wrapper_panel_on && !olh_overlay_on &&
@@ -342,7 +387,7 @@ void touch_bridge_event(const SDL_Event *event) {
             request_mode(true);
         TouchMode before_mode = touch.mode;
         touch_finger(&touch, surface.phase, surface.device, surface.finger,
-                     surface.x, surface.y, surface.sample_ms);
+                     surface.x, surface.y, SDL_GetTicks());
         if (touch.mode != before_mode)
             touch_use_pending = pending_auto_return = false;
         if (touch.move_owner < 0) clear_movement();

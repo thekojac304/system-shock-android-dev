@@ -10,12 +10,24 @@ static void emit(TouchControls *t, TouchOutput output, float x, float y) {
 static TouchMode effective(const TouchControls *t) {
     return t->panel==TOUCH_UI_CLOSED && t->gameplay_available && !t->controller ? t->mode : TOUCH_CURSOR;
 }
+static void haptic(TouchControls *t, int level) {
+    if (t->settings.haptics_enabled && t->enabled && t->gameplay_available &&
+        !t->controller && t->panel==TOUCH_UI_CLOSED)
+        emit(t,TOUCH_HAPTIC,(float)level,0);
+}
+static int radial_category(TouchAction action) {
+    if (action==TOUCH_WEAPON_NEXT) return TOUCH_RADIAL_WEAPON;
+    if (action==TOUCH_CONSUMABLE) return TOUCH_RADIAL_CONSUMABLE;
+    if (action==TOUCH_EXPLOSIVE) return TOUCH_RADIAL_EXPLOSIVE;
+    return -1;
+}
 
 void touch_init(TouchControls *t, TouchEmit callback, void *user) {
     memset(t, 0, sizeof(*t));
     t->mode = TOUCH_GAMEPLAY;
     t->effective_mode = TOUCH_CURSOR;
     t->move_owner = t->look_owner = t->cursor_owner = -1;
+    touch_radial_close(&t->radial);
     t->emit = callback;
     t->user = user;
     touch_settings_defaults(&t->settings);
@@ -32,6 +44,7 @@ void touch_cancel(TouchControls *t) {
     t->effective_mode=effective(t);
     memset(t->fingers, 0, sizeof(t->fingers));
     t->move_owner = t->look_owner = t->cursor_owner = -1;
+    touch_radial_close(&t->radial);
     t->movement_x = t->movement_y = t->look_x = t->look_y = 0;
     t->fire_count = t->use_count = 0;
     memset(t->action_count, 0, sizeof(t->action_count));
@@ -89,6 +102,44 @@ static void move_finger(TouchControls *t, TouchFinger *f, float x, float y) {
     }
 }
 
+void touch_tick(TouchControls *t, uint32_t now_ms) {
+    if (!t->enabled || !t->gameplay_available || t->controller ||
+        t->effective_mode!=TOUCH_GAMEPLAY || t->panel!=TOUCH_UI_CLOSED || t->radial.open) return;
+    for (int i=0;i<TOUCH_MAX_FINGERS;++i) {
+        TouchFinger *f=&t->fingers[i];
+        if (!f->active || !f->radial_pending || f->radial_cancelled ||
+            (uint32_t)(now_ms-f->down_ms)<TOUCH_RADIAL_HOLD_MS) continue;
+        /* Refuse a wheel during a held attack/use; require a fresh gesture. */
+        f->radial_pending=false;
+        if (t->fire_count || t->use_count) { f->radial_cancelled=true; continue; }
+        int category=radial_category(f->action);
+        TouchRadialEntry entries[TOUCH_RADIAL_MAX_ENTRIES]={{0}};
+        int count=t->radial_populate ? t->radial_populate(t->user,(TouchRadialCategory)category,entries) : 0;
+        if (count<0 || count>TOUCH_RADIAL_MAX_ENTRIES ||
+            !touch_radial_open(&t->radial,i,(TouchRadialCategory)category,
+                               t->layout.width,t->layout.height,entries,count)) {
+            f->radial_cancelled=true;
+            continue;
+        }
+        f->radial_opened=true;
+        /* Existing look ownership ends at open. No look accumulation or
+           resumed look is allowed until that finger is lifted and pressed anew. */
+        if (t->look_owner>=0) {
+            t->fingers[t->look_owner].owns_look=false;
+            t->fingers[t->look_owner].role=TOUCH_NONE;
+            t->look_owner=-1; t->look_x=t->look_y=0;
+        }
+        for (int j=0;j<TOUCH_MAX_FINGERS;++j)
+            if (j!=i && t->fingers[j].radial_pending) {
+                t->fingers[j].radial_pending=false;
+                t->fingers[j].radial_cancelled=true;
+            }
+        touch_radial_highlight(&t->radial,i,f->x,f->y);
+        haptic(t,2);
+        break;
+    }
+}
+
 void touch_finger(TouchControls *t, TouchPhase phase, int64_t device, int64_t id,
                   float x, float y, uint32_t timestamp_ms) {
     if (phase == TOUCH_ABORT) { touch_cancel(t); return; }
@@ -117,6 +168,7 @@ void touch_finger(TouchControls *t, TouchPhase phase, int64_t device, int64_t id
             in_circle(x, y, t->layout.action[TOUCH_PAUSE])) {
             role = TOUCH_ACTION;
         } else if (!t->controller && t->gameplay_available && in_rect(x, y, t->layout.toggle)) {
+            haptic(t,2);
             touch_set_mode(t, t->mode == TOUCH_GAMEPLAY ? TOUCH_CURSOR : TOUCH_GAMEPLAY);
             role = TOUCH_MODE_TOGGLE;
         } else if (t->effective_mode == TOUCH_CURSOR) {
@@ -127,13 +179,13 @@ void touch_finger(TouchControls *t, TouchPhase phase, int64_t device, int64_t id
                     role = TOUCH_ACTION; break;
                 }
         }
-        if (role == TOUCH_NONE && t->effective_mode == TOUCH_GAMEPLAY &&
+        if (role == TOUCH_NONE && !t->radial.open && t->effective_mode == TOUCH_GAMEPLAY &&
             in_circle(x, y, t->layout.fire)) role = TOUCH_FIRE;
-        else if (role == TOUCH_NONE && t->effective_mode == TOUCH_GAMEPLAY &&
+        else if (role == TOUCH_NONE && !t->radial.open && t->effective_mode == TOUCH_GAMEPLAY &&
                  in_circle(x, y, t->layout.use)) role = TOUCH_USE;
         else if (role == TOUCH_NONE && t->effective_mode == TOUCH_GAMEPLAY &&
                  x < t->layout.move_split && t->move_owner < 0) role = TOUCH_MOVE;
-        else if (role == TOUCH_NONE && t->effective_mode == TOUCH_GAMEPLAY &&
+        else if (role == TOUCH_NONE && !t->radial.open && t->effective_mode == TOUCH_GAMEPLAY &&
                  x >= t->layout.move_split && t->look_owner < 0) role = TOUCH_LOOK;
 
         TouchFinger *f = &t->fingers[index];
@@ -144,8 +196,17 @@ void touch_finger(TouchControls *t, TouchPhase phase, int64_t device, int64_t id
                 if (in_circle(x, y, t->layout.action[action])) {
                     f->action = (TouchAction)action; break;
                 }
-            if (t->action_count[f->action]++ == 0 && f->action != TOUCH_SPRINT)
-                emit(t, TOUCH_ACTION_DOWN, (float)f->action, 0);
+            int category=radial_category(f->action);
+            if (category>=0 && t->settings.wheel_enabled[category]) {
+                /* A pending wheel owns this tap until release or hold. */
+                if (t->radial.open) f->radial_cancelled=true;
+                else f->radial_pending=true;
+            } else {
+                if (t->action_count[f->action]++ == 0 && f->action != TOUCH_SPRINT) {
+                    emit(t, TOUCH_ACTION_DOWN, (float)f->action, 0);
+                    haptic(t,1);
+                }
+            }
         }
         if (role == TOUCH_MOVE) {
             t->move_owner = index; t->anchor_x = x; t->anchor_y = y;
@@ -153,8 +214,8 @@ void touch_finger(TouchControls *t, TouchPhase phase, int64_t device, int64_t id
         if ((role == TOUCH_LOOK || role == TOUCH_FIRE) && t->look_owner < 0) {
             t->look_owner = index; f->owns_look = true;
         }
-        if (role == TOUCH_FIRE && t->fire_count++ == 0) emit(t, TOUCH_FIRE_DOWN, x, y);
-        if (role == TOUCH_USE && t->use_count++ == 0) emit(t, TOUCH_USE_PRESS, x, y);
+        if (role == TOUCH_FIRE && t->fire_count++ == 0) { emit(t, TOUCH_FIRE_DOWN, x, y); haptic(t,1); }
+        if (role == TOUCH_USE && t->use_count++ == 0) { emit(t, TOUCH_USE_PRESS, x, y); haptic(t,1); }
         if (role == TOUCH_CURSOR_OWNER) {
             t->cursor_owner = index;
             emit(t, TOUCH_POINTER_MOVE, x, y); /* position, never press yet */
@@ -165,6 +226,17 @@ void touch_finger(TouchControls *t, TouchPhase phase, int64_t device, int64_t id
     if (index < 0) return;
     TouchFinger *f = &t->fingers[index];
     move_finger(t, f, x, y);
+    if (f->radial_pending) {
+        float dx=x-f->start_x,dy=y-f->start_y;
+        float slop=fmaxf(t->cursor_slop*2,t->layout.action[f->action].radius*.45f);
+        if (dx*dx+dy*dy>slop*slop) {
+            f->radial_pending=false;
+            f->radial_cancelled=true;
+        }
+    }
+    touch_tick(t,timestamp_ms);
+    if (f->radial_opened && t->radial.open)
+        touch_radial_highlight(&t->radial,index,x,y);
     if (f->role == TOUCH_CURSOR_OWNER) {
         float dx = x - f->start_x, dy = y - f->start_y;
         if (!f->dragging && dx*dx + dy*dy > t->cursor_slop*t->cursor_slop) {
@@ -189,7 +261,21 @@ void touch_finger(TouchControls *t, TouchPhase phase, int64_t device, int64_t id
     if (f->owns_look) t->look_owner = -1;
     if (f->role == TOUCH_FIRE && --t->fire_count == 0) emit(t, TOUCH_FIRE_UP, x, y);
     if (f->role == TOUCH_USE) --t->use_count;
-    if (f->role == TOUCH_ACTION && --t->action_count[f->action] == 0) {
+    if (f->radial_opened) {
+        int category=t->radial.category;
+        int selected=touch_radial_release(&t->radial,index,x,y);
+        if (selected>=0) {
+            emit(t,TOUCH_RADIAL_SELECT,(float)category,(float)selected);
+            haptic(t,2);
+        }
+    } else if (f->radial_pending && !f->radial_cancelled) {
+        /* Only the enabled host action is deferred. Disabled hosts still
+           dispatch on down, as they did before Alpha 4. */
+        emit(t,TOUCH_ACTION_DOWN,(float)f->action,0);
+        emit(t,TOUCH_ACTION_UP,(float)f->action,0);
+        haptic(t,1);
+    } else if (f->role == TOUCH_ACTION && !f->radial_cancelled &&
+               --t->action_count[f->action] == 0) {
         if (f->action == TOUCH_SPRINT) {
             float dx = x - f->start_x, dy = y - f->start_y;
             if (timestamp_ms - f->down_ms <= TOUCH_TAP_MS &&
@@ -198,6 +284,7 @@ void touch_finger(TouchControls *t, TouchPhase phase, int64_t device, int64_t id
                 t->sprint_latched = !t->sprint_latched;
                 emit(t, t->sprint_latched ? TOUCH_ACTION_DOWN : TOUCH_ACTION_UP,
                      (float)TOUCH_SPRINT, 0);
+                haptic(t,2);
             }
         } else emit(t, TOUCH_ACTION_UP, (float)f->action, 0);
     }

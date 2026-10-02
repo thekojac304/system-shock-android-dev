@@ -41,17 +41,77 @@ static void rect(SDL_Renderer *r, TouchRect b, bool fill) {
     if (fill) SDL_RenderFillRectF(r,&v); else SDL_RenderDrawRectF(r,&v);
 }
 static void circle(SDL_Renderer *r, TouchCircle c, bool held, bool selected, float opacity, float stroke) {
-    color(r,held ? 37 : 19,held ? 119 : 33,held ? 133 : 43,held ? 210 : 120,opacity);
+    color(r,selected ? 86 : held ? 35 : 12,
+          selected ? 62 : held ? 127 : 39,
+          selected ? 27 : held ? 143 : 53,
+          selected ? 205 : held ? 230 : 145,opacity);
     for (int y=-(int)c.radius;y<=(int)c.radius;++y) {
         float span=sqrtf(fmaxf(0,c.radius*c.radius-y*y));
         SDL_RenderDrawLineF(r,c.x-span,c.y+y,c.x+span,c.y+y);
     }
-    color(r,selected ? 255 : 173,selected ? 211 : 226,selected ? 99 : 232,selected ? 255 : 215,opacity);
+    color(r,selected ? 255 : held ? 235 : 173,
+          selected ? 211 : held ? 250 : 226,
+          selected ? 99 : held ? 252 : 232,selected ? 255 : 235,opacity);
     for (int line=0;line<(int)stroke;++line) for (int i=0;i<64;++i) {
         float a=i*6.2831853f/64,b=(i+1)*6.2831853f/64,rad=c.radius-line;
         SDL_RenderDrawLineF(r,c.x+cosf(a)*rad,c.y+sinf(a)*rad,
                            c.x+cosf(b)*rad,c.y+sinf(b)*rad);
     }
+}
+static void radial(const TouchControls *t,SDL_Renderer *r) {
+    const TouchRadialSelector *wheel=&t->radial;
+    if (!wheel->open) return;
+    float R=wheel->outer_radius,inner=wheel->inner_radius;
+    TouchCircle outer={wheel->cx,wheel->cy,R};
+    color(r,8,22,30,205,fmaxf(.65f,t->settings.opacity));
+    for (int y=-(int)R;y<=(int)R;++y) {
+        float span=sqrtf(fmaxf(0,R*R-y*y));
+        SDL_RenderDrawLineF(r,outer.x-span,outer.y+y,outer.x+span,outer.y+y);
+    }
+    if (wheel->count) for (int i=0;i<wheel->count;++i) {
+        float angle=6.2831853f*i/wheel->count-1.5707963f;
+        float half=3.14159265f/wheel->count;
+        const TouchRadialEntry *entry=&wheel->entries[i];
+        if (i==wheel->highlighted || entry->current) {
+            bool chosen=i==wheel->highlighted;
+            color(r,chosen ? 39 : 54,chosen ? 100 : 81,chosen ? 116 : 85,
+                  chosen ? 225 : 170,fmaxf(.7f,t->settings.opacity));
+            for (float a=angle-half+.008f;a<angle+half-.008f;a+=1.0f/R)
+                SDL_RenderDrawLineF(r,wheel->cx+cosf(a)*inner,wheel->cy+sinf(a)*inner,
+                                    wheel->cx+cosf(a)*(R-2),wheel->cy+sinf(a)*(R-2));
+        }
+        color(r,entry->available ? 188 : 95,entry->available ? 231 : 115,
+              entry->available ? 235 : 120,220,fmaxf(.7f,t->settings.opacity));
+        float edge=angle-half;
+        SDL_RenderDrawLineF(r,wheel->cx+cosf(edge)*inner,wheel->cy+sinf(edge)*inner,
+                            wheel->cx+cosf(edge)*R,wheel->cy+sinf(edge)*R);
+        char label[sizeof(entry->label)];
+        snprintf(label,sizeof(label),"%s",entry->label);
+        for (char *p=label;*p;++p) if (*p>='a' && *p<='z') *p=(char)(*p-'a'+'A');
+        float x=wheel->cx+cosf(angle)*R*.68f,y=wheel->cy+sinf(angle)*R*.68f;
+        color(r,entry->available ? 237 : 132,entry->available ? 249 : 145,
+              entry->available ? 247 : 150,255,fmaxf(.7f,t->settings.opacity));
+        text(r,label,x,y,t->layout.height/270,R*.64f);
+        if (entry->current) {
+            color(r,255,213,110,255,fmaxf(.7f,t->settings.opacity));
+            text(r,"ACTIVE",x,y-R*.13f,t->layout.height/410,R*.5f);
+        }
+        if (wheel->category!=TOUCH_RADIAL_WEAPON) {
+            char count[16];
+            snprintf(count,sizeof(count),"X%u",entry->count);
+            color(r,217,232,232,245,fmaxf(.7f,t->settings.opacity));
+            text(r,count,x,y+R*.13f,t->layout.height/390,R*.42f);
+        }
+    }
+    color(r,179,220,224,245,fmaxf(.7f,t->settings.opacity));
+    for (int i=0;i<128;++i) {
+        float a=i*6.2831853f/128,b=(i+1)*6.2831853f/128;
+        SDL_RenderDrawLineF(r,wheel->cx+cosf(a)*R,wheel->cy+sinf(a)*R,
+                            wheel->cx+cosf(b)*R,wheel->cy+sinf(b)*R);
+    }
+    circle(r,(TouchCircle){wheel->cx,wheel->cy,inner},false,false,1,fmaxf(1,R/110));
+    color(r,241,243,228,255,1);
+    text(r,"CANCEL",wheel->cx,wheel->cy,t->layout.height/290,inner*1.6f);
 }
 static bool held(const TouchControls *t,int id) {
     if (id==TC_FIRE) return t->fire_count>0;
@@ -75,14 +135,16 @@ static void controls(const TouchControls *t,SDL_Renderer *r) {
         bool down=!preview && held(t,id);
         const char *name=touch_defaults[id].label;
         if (id==TC_MODE) {
-            color(r,24,43,54,170,opacity); rect(r,b,true);
+            color(r,t->mode==TOUCH_GAMEPLAY ? 15 : 59,
+                  t->mode==TOUCH_GAMEPLAY ? 58 : 59,
+                  t->mode==TOUCH_GAMEPLAY ? 70 : 82,190,opacity); rect(r,b,true);
             bool cursor=t->mode==TOUCH_CURSOR;
             color(r,selected || cursor ? 255 : 173,selected || cursor ? 211 : 226,
                   selected || cursor ? 99 : 232,240,opacity);
             for (int line=0;line<(int)stroke;++line) {
                 TouchRect outline={b.x+line,b.y+line,b.w-2*line,b.h-2*line}; rect(r,outline,false);
             }
-            name=t->mode==TOUCH_GAMEPLAY ? "LOOK >" : "CURSOR >";
+            name=t->mode==TOUCH_GAMEPLAY ? "LOOK" : "CURSOR";
         } else {
             TouchCircle c={b.x+b.w/2,b.y+b.h/2,b.w/2};
             if (id==TC_STICK && !preview && t->move_owner>=0) { c.x=t->anchor_x; c.y=t->anchor_y; }
@@ -94,15 +156,27 @@ static void controls(const TouchControls *t,SDL_Renderer *r) {
             }
             if (id==TC_SPRINT && down) name="RUN ON";
         }
-        color(r,selected ? 255 : 226,selected ? 224 : 245,selected ? 135 : 245,245,opacity);
+        color(r,selected ? 255 : 226,selected ? 224 : 245,selected ? 135 : 245,245,
+              fmaxf(.6f,opacity));
         text(r,name,b.x+b.w/2,b.y+b.h/2,h/240*t->settings.control[id].scale,b.w*.86f);
     }
 }
 static const char *ui_label(const TouchControls *t,int action) {
     static const char *names[TU_COUNT]={"EDIT LAYOUT","-","+","-","+","-","+",
         "INVERT Y OFF","-","+","RESET TOUCH SETTINGS","CANCEL","SAVE / DONE",
-        "<",">","SIZE -","SIZE +","SETTINGS","MOVE TOOLBAR"};
+        "<",">","SIZE -","SIZE +","SETTINGS","MOVE TOOLBAR","MORE >",
+        "HAPTICS OFF","HAPTIC STRENGTH 1","WEAPON WHEEL OFF",
+        "CONSUMABLE WHEEL OFF","EXPLOSIVE WHEEL OFF"};
     if (action==TU_INVERT && t->settings.invert_y) return "INVERT Y ON";
+    if (action==TU_PAGE) return t->settings_page ? "< BACK" : "MORE >";
+    if (action==TU_HAPTICS) return t->settings.haptics_enabled ? "HAPTICS ON" : "HAPTICS OFF";
+    if (action==TU_HAPTIC_STRENGTH) {
+        static const char *levels[]={"HAPTIC STRENGTH 1","HAPTIC STRENGTH 2","HAPTIC STRENGTH 3"};
+        return levels[t->settings.haptic_strength-1];
+    }
+    if (action==TU_WHEEL_WEAPON) return t->settings.wheel_enabled[0] ? "WEAPON WHEEL ON" : "WEAPON WHEEL OFF";
+    if (action==TU_WHEEL_CONSUMABLE) return t->settings.wheel_enabled[1] ? "CONSUMABLE WHEEL ON" : "CONSUMABLE WHEEL OFF";
+    if (action==TU_WHEEL_EXPLOSIVE) return t->settings.wheel_enabled[2] ? "EXPLOSIVE WHEEL ON" : "EXPLOSIVE WHEEL OFF";
     if (t->panel==TOUCH_UI_EDITOR) {
         if (action==TU_OPACITY_DOWN) return "OPACITY -";
         if (action==TU_OPACITY_UP) return "OPACITY +";
@@ -122,7 +196,7 @@ static void panel(const TouchControls *t,SDL_Renderer *r) {
                               t->settings.sensitivity_y,t->settings.control[TC_STICK].scale};
         const char *names[4]={"OPACITY","LOOK X","LOOK Y","STICK SIZE"};
         const float rows[4]={.3075f,.4075f,.5075f,.7075f};
-        for (int i=0;i<4;++i) {
+        for (int i=0;i<4 && !t->settings_page;++i) {
             if (i==0) snprintf(value,sizeof(value),"%s %.0f%%",names[i],values[i]);
             else snprintf(value,sizeof(value),"%s %.2f",names[i],values[i]);
             text(r,value,w*.5f,h*rows[i],h/255,w*.33f);
@@ -171,6 +245,7 @@ void touch_draw(const TouchControls *t,SDL_Renderer *r) {
     SDL_RenderSetClipRect(r,NULL);
     SDL_SetRenderDrawBlendMode(r,SDL_BLENDMODE_BLEND);
     controls(t,r);
+    if (t->panel==TOUCH_UI_CLOSED) radial(t,r);
     if (t->panel!=TOUCH_UI_CLOSED) panel(t,r);
     SDL_SetRenderDrawBlendMode(r,blend);
     SDL_SetRenderDrawColor(r,red,green,blue,alpha);

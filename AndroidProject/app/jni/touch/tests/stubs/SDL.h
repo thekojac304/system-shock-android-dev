@@ -40,4 +40,5 @@ Uint32 SDL_GetWindowFlags(SDL_Window *);
 void SDL_RenderGetScale(SDL_Renderer *, float *, float *);
 void SDL_RenderWindowToLogical(SDL_Renderer *, int, int, float *, float *);
 int SDL_SetRelativeMouseMode(int);
+Uint32 SDL_GetTicks(void);
 #endif

@@ -69,6 +69,7 @@ void touch_ui_open(TouchControls *t) {
     t->panel=TOUCH_UI_SETTINGS;
     t->effective_mode=TOUCH_CURSOR;
     t->selected=TC_FIRE;
+    t->settings_page=0;
     t->save_failed=false;
     ui_emit(t,TOUCH_UI_CHANGED);
 }
@@ -92,13 +93,19 @@ void touch_ui_action(TouchControls *t, TouchUiAction action) {
     case TU_SCALE_DOWN: t->settings.control[t->selected].scale-=.1f; break;
     case TU_SCALE_UP: t->settings.control[t->selected].scale+=.1f; break;
     case TU_DOCK: t->toolbar_top=!t->toolbar_top; break;
+    case TU_PAGE: t->settings_page=1-t->settings_page; break;
+    case TU_HAPTICS: t->settings.haptics_enabled=!t->settings.haptics_enabled; break;
+    case TU_HAPTIC_STRENGTH: t->settings.haptic_strength=t->settings.haptic_strength%3+1; break;
+    case TU_WHEEL_WEAPON: t->settings.wheel_enabled[0]=!t->settings.wheel_enabled[0]; break;
+    case TU_WHEEL_CONSUMABLE: t->settings.wheel_enabled[1]=!t->settings.wheel_enabled[1]; break;
+    case TU_WHEEL_EXPLOSIVE: t->settings.wheel_enabled[2]=!t->settings.wheel_enabled[2]; break;
     case TU_RESET: touch_settings_defaults(&t->settings); break;
     case TU_SAVE:
         touch_settings_validate(&t->settings);
         ui_emit(t,TOUCH_SETTINGS_SAVE);
         if (t->save_failed) break;
         t->saved_settings=t->settings;
-        /* fall through: close with the newly committed snapshot */
+        /* fall through */
     case TU_CANCEL:
         touch_cancel(t);
         ui_emit(t,TOUCH_UI_CHANGED);
@@ -113,8 +120,22 @@ TouchRect touch_ui_bounds(const TouchControls *t, TouchUiAction action) {
     TouchRect r={0};
     if (t->panel==TOUCH_UI_SETTINGS) {
         float y=0;
-        switch (action) {
+        if (t->settings_page==1) {
+            switch (action) {
+            case TU_PAGE: r=(TouchRect){.67f,.055f,.12f,.065f}; break;
+            case TU_HAPTICS: r=(TouchRect){.22f,.18f,.56f,.085f}; break;
+            case TU_HAPTIC_STRENGTH: r=(TouchRect){.22f,.285f,.56f,.085f}; break;
+            case TU_WHEEL_WEAPON: r=(TouchRect){.22f,.40f,.56f,.085f}; break;
+            case TU_WHEEL_CONSUMABLE: r=(TouchRect){.22f,.51f,.56f,.085f}; break;
+            case TU_WHEEL_EXPLOSIVE: r=(TouchRect){.22f,.62f,.56f,.085f}; break;
+            case TU_RESET: r=(TouchRect){.22f,.77f,.56f,.065f}; break;
+            case TU_CANCEL: r=(TouchRect){.22f,.87f,.26f,.075f}; break;
+            case TU_SAVE: r=(TouchRect){.52f,.87f,.26f,.075f}; break;
+            default: break;
+            }
+        } else switch (action) {
         case TU_EDIT: r=(TouchRect){.22f,.16f,.56f,.075f}; break;
+        case TU_PAGE: r=(TouchRect){.67f,.055f,.12f,.065f}; break;
         case TU_OPACITY_DOWN: case TU_OPACITY_UP: y=.27f; break;
         case TU_X_DOWN: case TU_X_UP: y=.37f; break;
         case TU_Y_DOWN: case TU_Y_UP: y=.47f; break;

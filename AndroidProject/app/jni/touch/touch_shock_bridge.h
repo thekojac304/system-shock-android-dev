@@ -23,6 +23,10 @@ void touch_input_button(bool left, bool down);
 void touch_input_cancel(void);
 void touch_input_action(TouchAction action, bool down);
 void touch_input_cancel_actions(void);
+/* Game-owned adapter: snapshots inventory and revalidates before selection. */
+int touch_game_radial_snapshot(TouchRadialCategory category,
+                               TouchRadialEntry entries[TOUCH_RADIAL_MAX_ENTRIES]);
+bool touch_game_radial_select(TouchRadialCategory category, int id);
 /* Game/UI region query in input.c, using the same UI coordinate conversion. */
 TouchCursorTarget touch_cursor_target_at(int x, int y);
 #endif

@@ -30,6 +30,21 @@ static int center_warps, relative_off;
 static int action_down[TOUCH_ACTION_COUNT], action_up[TOUCH_ACTION_COUNT], action_cancels;
 static bool sprint_active;
 static TouchCursorTarget cursor_target;
+static Uint32 test_ticks;
+static int snapshot_count,selection_calls,selection_id,selection_category;
+Uint32 SDL_GetTicks(void) { return test_ticks; }
+int touch_game_radial_snapshot(TouchRadialCategory category,
+                               TouchRadialEntry entries[TOUCH_RADIAL_MAX_ENTRIES]) {
+    (void)category;
+    if (snapshot_count) {
+        entries[0].id=4; entries[0].available=true;
+        strcpy(entries[0].label,"TEST");
+    }
+    return snapshot_count;
+}
+bool touch_game_radial_select(TouchRadialCategory category,int id) {
+    selection_calls++; selection_id=id; selection_category=category; return true;
+}
 static bool switch_target_on_press;
 TouchCursorTarget touch_cursor_target_at(int x,int y) {(void)x; (void)y; return cursor_target;}
 void touch_input_action(TouchAction action,bool down) {
@@ -102,8 +117,29 @@ static void reset(void) {
     input_cursor_mode=INPUT_NORMAL_CURSOR; object_on_cursor=OBJ_NULL;
     nx=1024; ny=768;
     center_warps=relative_off=0;
+    test_ticks=0; snapshot_count=selection_calls=0;
     touch_bridge_init(); touch_bridge_controller(false); touch_bridge_sync();
     event_count=0; cursor_target=TOUCH_TARGET_UI_CONTROL; switch_target_on_press=false;
+}
+static void radial_dispatch(void) {
+    reset(); snapshot_count=1; touch.settings.wheel_enabled[0]=true;
+    int before=action_down[TOUCH_WEAPON_NEXT];
+    test_ticks=100; finger(SDL_FINGERDOWN,71,.55f,.90f);
+    assert(action_down[TOUCH_WEAPON_NEXT]==before);
+    test_ticks=420; touch_bridge_sync(); assert(touch.radial.open);
+    float x=touch.radial.cx/touch.layout.width;
+    float y=(touch.radial.cy-touch.radial.outer_radius*.7f)/touch.layout.height;
+    test_ticks=430; finger(SDL_FINGERMOTION,71,x,y);
+    test_ticks=440; finger(SDL_FINGERUP,71,x,y);
+    assert(selection_calls==1 && selection_id==4 && selection_category==TOUCH_RADIAL_WEAPON);
+    assert(action_down[TOUCH_WEAPON_NEXT]==before && !touch.radial.open);
+    reset(); snapshot_count=1; touch.settings.wheel_enabled[1]=true;
+    test_ticks=100; finger(SDL_FINGERDOWN,72,.52f,.10f);
+    test_ticks=420; touch_bridge_sync(); assert(touch.radial.open);
+    touch_bridge_controller(true);
+    assert(!touch.radial.open && selection_calls==0);
+    test_ticks=430; finger(SDL_FINGERUP,72,.52f,.10f);
+    assert(selection_calls==0);
 }
 static void aim_and_actions(void) {
     reset(); assert(hints>=2);
@@ -459,5 +495,6 @@ int main(void) {
     aim_and_actions(); movement_and_lifecycle(); cursor_fallback(); full_surface_and_transition(); alpha2_actions(); cursor_regions(); cutscene_touch_skip();
     touch_world_item_auto_return(); touch_world_item_reset();
     settings_overlay_lifecycle();
+    radial_dispatch();
     puts("TOUCH_BRIDGE_TESTS=PASS (Alpha 2 actions, cutscene tap, item return, lifecycle and surface integration)"); return 0;
 }

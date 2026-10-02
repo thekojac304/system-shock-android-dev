@@ -28,6 +28,8 @@ void touch_settings_defaults(TouchSettings *s) {
     memset(s, 0, sizeof(*s));
     s->version=TOUCH_SETTINGS_VERSION;
     s->opacity=1; s->sensitivity_x=s->sensitivity_y=1;
+    /* First introduction defaults off: no unexpected vibration or hold delay. */
+    s->haptics_enabled=false; s->haptic_strength=1;
     for (int i=0; i<TC_COUNT; ++i)
         s->control[i]=(TouchPlacement){touch_defaults[i].x,touch_defaults[i].y,1};
 }
@@ -36,6 +38,7 @@ void touch_settings_validate(TouchSettings *s) {
     s->opacity=bounded(s->opacity,TOUCH_OPACITY_MIN,1,1);
     s->sensitivity_x=bounded(s->sensitivity_x,TOUCH_SENS_MIN,TOUCH_SENS_MAX,1);
     s->sensitivity_y=bounded(s->sensitivity_y,TOUCH_SENS_MIN,TOUCH_SENS_MAX,1);
+    if (s->haptic_strength<1 || s->haptic_strength>3) s->haptic_strength=1;
     for (int i=0; i<TC_COUNT; ++i) {
         TouchPlacement *p=&s->control[i];
         p->x=bounded(p->x,0,1,touch_defaults[i].x);
@@ -64,6 +67,12 @@ TouchLoadResult touch_settings_load(TouchSettings *s, const char *path) {
         else if (!strcmp(key,"sensitivity_x")) s->sensitivity_x=value;
         else if (!strcmp(key,"sensitivity_y")) s->sensitivity_y=value;
         else if (!strcmp(key,"invert_y")) s->invert_y=value==1;
+        else if (!strcmp(key,"haptics_enabled")) s->haptics_enabled=value==1;
+        else if (!strcmp(key,"haptic_strength"))
+            s->haptic_strength=isfinite(value) && value>=1 && value<=3 && value==floorf(value) ? (unsigned)value : 1;
+        else if (!strcmp(key,"weapon_wheel")) s->wheel_enabled[0]=value==1;
+        else if (!strcmp(key,"consumable_wheel")) s->wheel_enabled[1]=value==1;
+        else if (!strcmp(key,"explosive_wheel")) s->wheel_enabled[2]=value==1;
         else if (!strcmp(key,"stick_size")) s->control[TC_STICK].scale=value;
         else for (int i=0; i<TC_COUNT; ++i) {
             char field[80];
@@ -94,6 +103,8 @@ bool touch_settings_save(const TouchSettings *settings, const char *path) {
     if (!f) return false;
     fprintf(f,"version=%u\nopacity=%.9g\nsensitivity_x=%.9g\nsensitivity_y=%.9g\ninvert_y=%d\n",
             s.version,s.opacity,s.sensitivity_x,s.sensitivity_y,s.invert_y);
+    fprintf(f,"haptics_enabled=%d\nhaptic_strength=%u\nweapon_wheel=%d\nconsumable_wheel=%d\nexplosive_wheel=%d\n",
+            s.haptics_enabled,s.haptic_strength,s.wheel_enabled[0],s.wheel_enabled[1],s.wheel_enabled[2]);
     for (int i=0; i<TC_COUNT; ++i) {
         const TouchPlacement *p=&s.control[i];
         fprintf(f,"%s.x=%.9g\n%s.y=%.9g\n%s.scale=%.9g\n",touch_defaults[i].key,p->x,

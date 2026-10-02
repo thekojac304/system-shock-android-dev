@@ -5,6 +5,8 @@ import android.content.Context;
 import android.content.pm.ActivityInfo;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.VibrationEffect;
+import android.os.Vibrator;
 import android.util.Log;
 import android.view.View;
 import android.view.WindowInsets;
@@ -15,6 +17,20 @@ import org.libsdl.app.SDLActivity;
 
 public class ShockolateActivity extends SDLActivity {
     private static final String TAG = "RP5NP";
+
+    /** Called only for accepted touch-control edges from the native bridge. */
+    public void touchHaptic(int strength, int level) {
+        if (!hasWindowFocus() || isFinishing()) return;
+        Vibrator vibrator = (Vibrator)getSystemService(Context.VIBRATOR_SERVICE);
+        if (vibrator == null || !vibrator.hasVibrator()) return;
+        int safeStrength = Math.max(1, Math.min(3, strength));
+        boolean confirmation = level >= 2;
+        int duration = confirmation ? 20 : 10;
+        int amplitude = Math.min(180, (confirmation ? 52 : 28) * safeStrength);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+            vibrator.vibrate(VibrationEffect.createOneShot(duration, amplitude));
+        else vibrator.vibrate(duration);
+    }
 
     private void lockOrientation(String phase) {
         setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);

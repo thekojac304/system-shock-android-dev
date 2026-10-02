@@ -89,6 +89,70 @@ static char sbcopy[] = "Spaceball Interface Copyright 1994 Spaceball Technologie
 #include "wares.h"
 
 extern uchar reload_weapon_hotkey(ushort keycode, uint32_t context, intptr_t data);
+extern uchar show_all_actives;
+extern short inv_last_page;
+
+static void touch_radial_label(char out[24], const char *name, int id) {
+    if (!name || !*name) { snprintf(out,24,"SLOT %d",id+1); return; }
+    int i=0;
+    for (; name[i] && i<23; ++i) {
+        char c=name[i];
+        out[i]=(c>='a' && c<='z') ? (char)(c-'a'+'A') : c;
+    }
+    out[i]=0;
+}
+
+int touch_game_radial_snapshot(TouchRadialCategory category,
+                               TouchRadialEntry entries[TOUCH_RADIAL_MAX_ENTRIES]) {
+    int count=0,limit=category==TOUCH_RADIAL_WEAPON ? NUM_WEAPON_SLOTS :
+                      category==TOUCH_RADIAL_CONSUMABLE ? NUM_DRUGZ : NUM_GRENADEZ;
+    if (!entries || category<0 || category>=TOUCH_RADIAL_CATEGORY_COUNT) return 0;
+    for (int i=0;i<limit && count<TOUCH_RADIAL_MAX_ENTRIES;++i) {
+        unsigned quantity=category==TOUCH_RADIAL_WEAPON ?
+            (player_struct.weapons[i].type!=EMPTY_WEAPON_SLOT) :
+            category==TOUCH_RADIAL_CONSUMABLE ? player_struct.drugs[i] : player_struct.grenades[i];
+        if (!quantity) continue; /* Unowned/zero-count items are hidden. */
+        TouchRadialEntry *e=&entries[count++];
+        char name[64]={0};
+        e->id=i; e->available=true; e->count=quantity;
+        if (category==TOUCH_RADIAL_WEAPON) {
+            e->current=player_struct.actives[ACTIVE_WEAPON]==i;
+            get_weapon_name(player_struct.weapons[i].type,player_struct.weapons[i].subtype,name);
+        } else if (category==TOUCH_RADIAL_CONSUMABLE) {
+            e->current=player_struct.actives[ACTIVE_DRUG]==i;
+            get_drug_name(i,name);
+        } else {
+            e->current=player_struct.actives[ACTIVE_GRENADE]==i;
+            get_grenade_name(i,name);
+        }
+        touch_radial_label(e->label,name,i);
+    }
+    return count;
+}
+
+bool touch_game_radial_select(TouchRadialCategory category, int id) {
+    if (category==TOUCH_RADIAL_WEAPON)
+        return touch_select_weapon_slot(id)!=FALSE;
+    if (category==TOUCH_RADIAL_CONSUMABLE) {
+        if (id<0 || id>=NUM_DRUGZ || !player_struct.drugs[id]) return false;
+        show_all_actives=TRUE;
+        inv_last_page=-1;
+        chg_set_flg(INVENTORY_UPDATE);
+        player_struct.actives[ACTIVE_DRUG]=id;
+        set_inventory_mfd(MFD_INV_DRUG,id,TRUE);
+        return true;
+    }
+    if (category==TOUCH_RADIAL_EXPLOSIVE) {
+        if (id<0 || id>=NUM_GRENADEZ || !player_struct.grenades[id]) return false;
+        show_all_actives=TRUE;
+        inv_last_page=-1;
+        chg_set_flg(INVENTORY_UPDATE);
+        player_struct.actives[ACTIVE_GRENADE]=id;
+        set_inventory_mfd(MFD_INV_GRENADE,id,TRUE);
+        return true;
+    }
+    return false;
+}
 #endif
 
 #ifdef NOT_YET // KLC - for VR headsets
