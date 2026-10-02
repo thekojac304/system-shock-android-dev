@@ -8,7 +8,7 @@ static void emit(TouchControls *t, TouchOutput output, float x, float y) {
 }
 
 static TouchMode effective(const TouchControls *t) {
-    return t->gameplay_available && !t->controller ? t->mode : TOUCH_CURSOR;
+    return t->panel==TOUCH_UI_CLOSED && t->gameplay_available && !t->controller ? t->mode : TOUCH_CURSOR;
 }
 
 void touch_init(TouchControls *t, TouchEmit callback, void *user) {
@@ -18,9 +18,18 @@ void touch_init(TouchControls *t, TouchEmit callback, void *user) {
     t->move_owner = t->look_owner = t->cursor_owner = -1;
     t->emit = callback;
     t->user = user;
+    touch_settings_defaults(&t->settings);
+    t->saved_settings=t->settings;
 }
 
 void touch_cancel(TouchControls *t) {
+    if (t->panel!=TOUCH_UI_CLOSED) {
+        t->settings=t->saved_settings;
+        t->panel=TOUCH_UI_CLOSED;
+        touch_layout_refresh(t);
+    }
+    t->ui_owned=t->ui_drag=false;
+    t->effective_mode=effective(t);
     memset(t->fingers, 0, sizeof(t->fingers));
     t->move_owner = t->look_owner = t->cursor_owner = -1;
     t->movement_x = t->movement_y = t->look_x = t->look_y = 0;
@@ -41,18 +50,8 @@ void touch_configure(TouchControls *t, float w, float h, bool enabled,
     t->pause_available = gameplay_available;
     t->controller = controller;
     t->effective_mode = effective(t);
-    t->layout = (TouchLayout){.width=w, .height=h, .move_radius=h*.11f,
-        .move_split=w*.45f, .fire={w*.86f,h*.73f,h*.095f},
-        .use={w*.69f,h*.85f,h*.065f},
-        .toggle={w*.79f,h*.045f,w*.18f,h*.075f}};
-    const TouchCircle actions[TOUCH_ACTION_COUNT] = {
-        {w*.95f,h*.52f,h*.05f}, {w*.79f,h*.54f,h*.05f},
-        {w*.55f,h*.78f,h*.045f}, {w*.55f,h*.90f,h*.045f},
-        {w*.52f,h*.10f,h*.045f}, {w*.63f,h*.10f,h*.045f},
-        {w*.22f,h*.54f,h*.05f}, {w*.73f,h*.10f,h*.045f},
-        {w*.05f,h*.06f,h*.045f}
-    };
-    memcpy(t->layout.action, actions, sizeof(actions));
+    t->layout.width=w; t->layout.height=h;
+    touch_layout_refresh(t);
     t->cursor_slop = h * (8.0f / 768.0f);
     t->look_scale = 1.0f;
 }
@@ -76,8 +75,9 @@ static bool in_rect(float x, float y, TouchRect r) {
 
 static void move_finger(TouchControls *t, TouchFinger *f, float x, float y) {
     if (f->owns_look) {
-        t->look_x += (x - f->x) * t->look_scale;
-        t->look_y += (y - f->y) * t->look_scale;
+        t->look_x += (x - f->x) * t->look_scale * t->settings.sensitivity_x;
+        t->look_y += (y - f->y) * t->look_scale * t->settings.sensitivity_y *
+                     (t->settings.invert_y ? -1.0f : 1.0f);
     }
     f->x = x; f->y = y;
     if (f->role == TOUCH_MOVE) {
@@ -94,6 +94,15 @@ void touch_finger(TouchControls *t, TouchPhase phase, int64_t device, int64_t id
     if (phase == TOUCH_ABORT) { touch_cancel(t); return; }
     /* Raw surface pixels, including bars. Ownership precedes any UI mapping. */
     if (!t->enabled || !isfinite(x) || !isfinite(y)) return;
+    if (t->panel!=TOUCH_UI_CLOSED) {
+        touch_ui_finger(t,phase,device,id,x,y);
+        return;
+    }
+    if (phase==TOUCH_DOWN && !t->controller && (t->gameplay_available || t->pause_available) &&
+        touch_control_hit(t,TC_SETTINGS,x,y)) {
+        touch_ui_open(t);
+        return;
+    }
     int index = -1, free_slot = -1;
     for (int i = 0; i < TOUCH_MAX_FINGERS; ++i) {
         TouchFinger *f = &t->fingers[i];
@@ -271,119 +280,3 @@ bool touch_key_source(TouchKeySources *k, TouchKeySource source, bool down) {
     k->source[source] = down;
     return before != touch_key_held(k);
 }
-
-#ifndef TOUCH_HEADLESS
-#include <SDL.h>
-/* Small built-in stroke glyphs for temporary control labels.
-   No texture assets, fonts, custom artwork, or allocation on the render path. */
-static void label(SDL_Renderer *r, const char *s, float cx, float cy, float scale) {
-    static const char letters[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ<>";
-    static const unsigned char glyphs[][5] = {
-        {2,5,7,5,5},{6,5,6,5,6},{3,4,4,4,3},{6,5,5,5,6},
-        {7,4,6,4,7},{7,4,6,4,4},{3,4,5,5,3},{5,5,7,5,5},
-        {7,2,2,2,7},{1,1,1,5,2},{5,5,6,5,5},{4,4,4,4,7},
-        {5,7,7,5,5},{5,7,7,7,5},{2,5,5,5,2},{6,5,6,4,4},
-        {2,5,5,7,3},{6,5,6,5,5},{3,4,2,1,6},{7,2,2,2,2},
-        {5,5,5,5,7},{5,5,5,5,2},{5,5,7,7,5},{5,5,2,5,5},
-        {5,5,2,2,2},{7,1,2,4,7},{1,2,4,2,1},{4,2,1,2,4}
-    };
-    float x = cx - (float)strlen(s)*4*scale/2;
-    for (; *s; ++s, x += 4*scale) {
-        const char *p = strchr(letters, *s);
-        if (!p) continue;
-        for (int y = 0; y < 5; ++y) for (int col = 0; col < 3; ++col) {
-            if (glyphs[p - letters][y] & (1u << (2-col))) {
-                SDL_FRect rect = {x+col*scale, cy-2.5f*scale+y*scale, scale, scale};
-                SDL_RenderFillRectF(r, &rect);
-            }
-        }
-    }
-}
-
-static void circle(SDL_Renderer *r, float x, float y, float radius, bool held) {
-    SDL_SetRenderDrawColor(r, 24, 36, 43, held ? 155 : 95);
-    for (int row = -(int)radius; row <= (int)radius; ++row) {
-        float span = sqrtf(fmaxf(0, radius*radius-row*row));
-        SDL_RenderDrawLineF(r, x-span, y+row, x+span, y+row);
-    }
-    SDL_SetRenderDrawColor(r, 210, 238, 238, held ? 210 : 130);
-    for (int i = 0; i < 64; ++i) {
-        float a = i * 6.2831853f/64, b = (i+1)*6.2831853f/64;
-        SDL_RenderDrawLineF(r, x+cosf(a)*radius, y+sinf(a)*radius,
-                           x+cosf(b)*radius, y+sinf(b)*radius);
-    }
-}
-
-void touch_draw(const TouchControls *t, SDL_Renderer *r) {
-    if (!t->enabled || (!t->gameplay_available && !t->pause_available) || t->controller) return;
-    Uint8 red, green, blue, alpha;
-    SDL_BlendMode blend;
-    SDL_Rect clip;
-    SDL_Rect viewport;
-    float scale_x, scale_y;
-    SDL_bool clipped = SDL_RenderIsClipEnabled(r);
-    SDL_RenderGetClipRect(r, &clip);
-    SDL_GetRenderDrawColor(r, &red, &green, &blue, &alpha);
-    SDL_GetRenderDrawBlendMode(r, &blend);
-    SDL_RenderGetScale(r, &scale_x, &scale_y);
-    /* Query/save the viewport in pixels to avoid SDL's integer rounding of
-       a letterbox offset divided by its logical scale. Logical size stays put. */
-    SDL_RenderSetScale(r, 1, 1);
-    SDL_RenderGetViewport(r, &viewport);
-    SDL_RenderSetViewport(r, NULL);
-    SDL_RenderSetClipRect(r, NULL);
-    SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
-    /* Full output surface: the exact raw touch hit-test space. */
-    const TouchLayout *l = &t->layout;
-    float font = l->height / 192;
-    if (t->effective_mode == TOUCH_GAMEPLAY) {
-        float x = t->move_owner < 0 ? l->width*.20f : t->anchor_x;
-        float y = t->move_owner < 0 ? l->height*.77f : t->anchor_y;
-        circle(r, x, y, l->move_radius, t->move_owner >= 0);
-        circle(r, x+t->movement_x*l->move_radius, y+t->movement_y*l->move_radius,
-               l->move_radius*.37f, t->move_owner >= 0);
-        circle(r, l->fire.x, l->fire.y, l->fire.radius, t->fire_count != 0);
-        label(r, "FIRE", l->fire.x, l->fire.y, font);
-        circle(r, l->use.x, l->use.y, l->use.radius, t->use_count != 0);
-        label(r, "USE", l->use.x, l->use.y, font);
-        static const char *names[TOUCH_ACTION_COUNT] = {
-            "JUMP", "CROUCH", "<", ">", "CONS", "BOOM", "RUN", "ID", "II"
-        };
-        for (int i = 0; i < TOUCH_PAUSE; ++i) {
-            TouchCircle c = l->action[i];
-            circle(r, c.x, c.y, c.radius,
-                   i == TOUCH_SPRINT ? t->sprint_latched : t->action_count[i] != 0);
-            label(r, names[i], c.x, c.y, font*.8f);
-        }
-    }
-    if (t->pause_available) {
-        TouchCircle c = l->action[TOUCH_PAUSE];
-        circle(r, c.x, c.y, c.radius, t->action_count[TOUCH_PAUSE] != 0);
-        label(r, "II", c.x, c.y, font);
-    }
-    if (!t->gameplay_available) goto restore;
-    SDL_FRect toggle = {l->toggle.x, l->toggle.y, l->toggle.w, l->toggle.h};
-    SDL_SetRenderDrawColor(r, 24, 36, 43, 125);
-    SDL_RenderFillRectF(r, &toggle);
-    SDL_SetRenderDrawColor(r, 210, 238, 238, 190);
-    int draw_result = SDL_RenderDrawRectF(r, &toggle);
-#if defined(__ANDROID__) && defined(TOUCH_DEBUG)
-    static int last_draw_result = 1;
-    if (draw_result != last_draw_result) {
-        SDL_Log("RP5NP_TOUCH_DRAW_RESULT result=%d blend=BLEND alpha=190 error=%s",
-                draw_result, draw_result < 0 ? SDL_GetError() : "none");
-        last_draw_result = draw_result;
-    }
-#else
-    (void)draw_result;
-#endif
-    label(r, t->effective_mode == TOUCH_GAMEPLAY ? "CURSOR" : "LOOK",
-          toggle.x+toggle.w/2, toggle.y+toggle.h/2, font);
-restore:
-    SDL_SetRenderDrawBlendMode(r, blend);
-    SDL_SetRenderDrawColor(r, red, green, blue, alpha);
-    SDL_RenderSetViewport(r, &viewport);
-    SDL_RenderSetScale(r, scale_x, scale_y);
-    SDL_RenderSetClipRect(r, clipped ? &clip : NULL);
-}
-#endif

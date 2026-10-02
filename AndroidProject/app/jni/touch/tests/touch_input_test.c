@@ -1,9 +1,9 @@
 /* Compile the real SDL adapter into this test TU to exercise its internal
    source routing and queued cancellation without a window or SDL runtime. */
 #include "SourceSnapshot/src/Libraries/INPUT/Source/sdl_events.c"
-#include "../touch_controls.c"
 #include <assert.h>
 #include <stdio.h>
+#include "touch_input_platform_stubs.h"
 
 SDL_Window *window;
 SDL_Renderer *renderer;

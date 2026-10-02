@@ -4,6 +4,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include "touch_settings.h"
 
 #define TOUCH_MAX_FINGERS 16
 typedef enum { TOUCH_GAMEPLAY, TOUCH_CURSOR } TouchMode;
@@ -22,7 +23,7 @@ typedef enum {
     TOUCH_FIRE_DOWN, TOUCH_FIRE_UP, TOUCH_USE_PRESS,
     TOUCH_POINTER_DOWN, TOUCH_POINTER_MOVE, TOUCH_POINTER_UP,
     TOUCH_MODE_CHANGED, TOUCH_CANCEL, TOUCH_ACTION_DOWN, TOUCH_ACTION_UP,
-    TOUCH_POINTER_TAP
+    TOUCH_POINTER_TAP, TOUCH_UI_CHANGED, TOUCH_SETTINGS_SAVE
 } TouchOutput;
 /* Outputs are ordered edges, not polled booleans: even a down/up between
    game polls reaches the original input queue. Cancellation invalidates them. */
@@ -31,7 +32,7 @@ typedef struct { float x, y, radius; } TouchCircle;
 typedef struct { float x, y, w, h; } TouchRect;
 typedef struct {
     float width, height, move_radius, move_split;
-    TouchCircle fire, use;
+    TouchCircle fire, use, settings, stick;
     TouchCircle action[TOUCH_ACTION_COUNT];
     TouchRect toggle;
 } TouchLayout;
@@ -44,6 +45,13 @@ typedef struct {
     uint32_t down_ms;
     bool dragging;
 } TouchFinger;
+typedef enum { TOUCH_UI_CLOSED, TOUCH_UI_SETTINGS, TOUCH_UI_EDITOR } TouchPanel;
+typedef enum {
+    TU_EDIT, TU_OPACITY_DOWN, TU_OPACITY_UP, TU_X_DOWN, TU_X_UP,
+    TU_Y_DOWN, TU_Y_UP, TU_INVERT, TU_STICK_DOWN, TU_STICK_UP,
+    TU_RESET, TU_CANCEL, TU_SAVE, TU_PREV, TU_NEXT, TU_SCALE_DOWN,
+    TU_SCALE_UP, TU_BACK, TU_DOCK, TU_COUNT
+} TouchUiAction;
 typedef struct {
     TouchMode mode, effective_mode;
     bool enabled, gameplay_available, pause_available, controller;
@@ -55,6 +63,13 @@ typedef struct {
     bool sprint_latched;
     float anchor_x, anchor_y, movement_x, movement_y, look_x, look_y;
     float cursor_slop, look_scale;
+    float stick_reference_height;
+    TouchSettings settings, saved_settings;
+    TouchPanel panel;
+    int selected, ui_action;
+    bool ui_owned, ui_drag, toolbar_top, save_failed;
+    int64_t ui_device, ui_finger;
+    float ui_start_x, ui_start_y, ui_offset_x, ui_offset_y;
     TouchEmit emit;
     void *user;
 } TouchControls;
@@ -64,6 +79,15 @@ void touch_cancel(TouchControls *t);
 void touch_configure(TouchControls *t, float width, float height,
                      bool enabled, bool gameplay_available, bool controller);
 void touch_set_mode(TouchControls *t, TouchMode mode);
+void touch_layout_refresh(TouchControls *t);
+TouchRect touch_control_bounds(const TouchControls *t, int id);
+bool touch_control_hit(const TouchControls *t, int id, float x, float y);
+void touch_editor_position(TouchControls *t, int id, float x, float y);
+void touch_ui_open(TouchControls *t);
+void touch_ui_action(TouchControls *t, TouchUiAction action);
+TouchRect touch_ui_bounds(const TouchControls *t, TouchUiAction action);
+void touch_ui_finger(TouchControls *t, TouchPhase phase, int64_t device, int64_t finger,
+                     float x, float y);
 void touch_finger(TouchControls *t, TouchPhase phase, int64_t device, int64_t finger,
                   float surface_x, float surface_y, uint32_t timestamp_ms);
 /* Sole surface -> game transform; clamp only after gameplay ownership. */

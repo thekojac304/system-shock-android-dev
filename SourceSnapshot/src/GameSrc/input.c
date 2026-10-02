@@ -374,6 +374,9 @@ void input_chk(void) {
     uiPoll();
     if (!view3d_got_event)
         poll_mouse();
+#ifdef __ANDROID__
+    touch_bridge_after_input();
+#endif
 
     // KLC - not needed on MAC   kb_flush_bios();
     // KLC - not needed on MAC   mouse_set_velocity(0,0);

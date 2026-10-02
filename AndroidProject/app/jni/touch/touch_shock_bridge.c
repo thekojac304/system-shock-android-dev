@@ -5,7 +5,9 @@
 #include "physics.h"
 #include "mainloop.h"
 #include "mouselook.h"
+#include "input.h"
 #include <stddef.h>
+#include <stdio.h>
 
 extern SDL_Window *window;
 extern SDL_Renderer *renderer;
@@ -19,12 +21,32 @@ static TouchMovieTap movie_tap;
 static bool movie_tap_enabled;
 static bool initialized, syncing, controller_connected, background, unfocused;
 static bool requested_look;
+/* A touch USE from LOOK may put a world object on the original game cursor.
+   Only that confirmed acquisition may trigger a return after release. */
+static bool touch_use_pending, pending_auto_return;
 static int output_width, output_height, window_width, window_height;
 static byte applied[2];
 static bool applied_axis[2];
 static TouchRect game_viewport;
 static float game_scale_x, game_scale_y;
 static int game_width, game_height;
+static bool settings_loaded, future_settings;
+static char settings_path[1024];
+
+static void load_settings(void) {
+    if (settings_loaded) return;
+#if defined(__ANDROID__) && !defined(TOUCH_HEADLESS)
+    const char *dir=SDL_AndroidGetInternalStoragePath();
+    if (!dir) return;
+    int n=snprintf(settings_path,sizeof(settings_path),"%s/touch-settings.cfg",dir);
+    if (n<0 || (size_t)n>=sizeof(settings_path)) { settings_path[0]=0; return; }
+    TouchLoadResult result=touch_settings_load(&touch.settings,settings_path);
+    future_settings=result==TOUCH_LOAD_FUTURE;
+    SDL_Log("TOUCH_SETTINGS load=%d path=%s",result,settings_path);
+    touch.saved_settings=touch.settings;
+#endif
+    settings_loaded=true;
+}
 
 #if defined(__ANDROID__) && defined(TOUCH_DEBUG)
 /* Temporary Touch Alpha visibility diagnostics: log transitions, not frames. */
@@ -107,6 +129,18 @@ static void output(void *user, TouchOutput event, float x, float y) {
         touch_input_cancel();
         touch_input_cancel_actions();
         break;
+    case TOUCH_SETTINGS_SAVE:
+        touch.save_failed=future_settings || !touch_settings_save(&touch.settings,settings_path);
+        break;
+    case TOUCH_UI_CHANGED:
+        /* A touch modal ends any pending item auto-return, just like the
+           original game's modal contexts. The Part O pickup path is unchanged. */
+        touch_use_pending=pending_auto_return=false;
+        request_mode(touch.panel==TOUCH_UI_CLOSED && touch.enabled &&
+                     touch.gameplay_available && !touch.controller &&
+                     touch.mode==TOUCH_GAMEPLAY && object_on_cursor==OBJ_NULL &&
+                     input_cursor_mode!=INPUT_OBJECT_CURSOR);
+        break;
     case TOUCH_ACTION_DOWN:
     case TOUCH_ACTION_UP:
         touch_input_action((TouchAction)(int)x, event == TOUCH_ACTION_DOWN);
@@ -124,6 +158,9 @@ static void output(void *user, TouchOutput event, float x, float y) {
         touch_input_button(false, false);
         break;
     case TOUCH_USE_PRESS:
+        if (touch.effective_mode == TOUCH_GAMEPLAY && mlook_enabled &&
+            input_cursor_mode != INPUT_OBJECT_CURSOR && object_on_cursor == OBJ_NULL)
+            touch_use_pending = true;
         middleize_mouse();
         touch_input_button(true, true);
         touch_input_button(true, false);
@@ -166,12 +203,15 @@ static void output(void *user, TouchOutput event, float x, float y) {
 void touch_bridge_init(void) {
     if (initialized) touch_cancel(&touch);
     requested_look = controller_connected = background = unfocused = false;
+    touch_use_pending = pending_auto_return = false;
     output_width = output_height = window_width = window_height = 0;
     /* Must precede SDL_Init: gameplay touches must never enter SDL's mouse
        state/relative accumulator. Physical mice still follow the old path. */
     SDL_SetHintWithPriority(SDL_HINT_TOUCH_MOUSE_EVENTS, "0", SDL_HINT_OVERRIDE);
     SDL_SetHintWithPriority(SDL_HINT_MOUSE_TOUCH_EVENTS, "0", SDL_HINT_OVERRIDE);
     touch_init(&touch, output, NULL);
+    settings_loaded=future_settings=false;
+    settings_path[0]=0;
     touch_movie_tap_reset(&movie_tap);
     movie_tap_enabled = false;
     initialized = true;
@@ -185,11 +225,23 @@ void touch_bridge_init(void) {
 void touch_bridge_cancel(void) {
     if (initialized) touch_cancel(&touch);
     touch_movie_tap_reset(&movie_tap);
+    touch_use_pending = pending_auto_return = false;
+}
+
+void touch_bridge_after_input(void) {
+    if (touch_use_pending) {
+        pending_auto_return = touch.enabled && touch.gameplay_available &&
+            !controller_connected && input_cursor_mode == INPUT_OBJECT_CURSOR &&
+            object_on_cursor != OBJ_NULL;
+        touch_use_pending = false;
+    }
+    touch_bridge_sync();
 }
 
 void touch_bridge_sync(void) {
     if (!initialized || syncing || !renderer || !window) return;
     syncing = true;
+    load_settings();
     touch_surface_init();
     int w = 0, h = 0, ow = 0, oh = 0, ww = 0, wh = 0;
     SDL_RenderGetLogicalSize(renderer, &w, &h);
@@ -214,13 +266,21 @@ void touch_bridge_sync(void) {
     Uint32 flags = SDL_GetWindowFlags(window);
     bool enabled = !background && !unfocused && (flags & SDL_WINDOW_INPUT_FOCUS) &&
                    !(flags & (SDL_WINDOW_HIDDEN | SDL_WINDOW_MINIMIZED));
+    enabled = enabled && w > 0 && h > 0 && sx > 0 && sy > 0;
+    if (!available || !enabled || controller_connected || touch.panel!=TOUCH_UI_CLOSED)
+        touch_use_pending = pending_auto_return = false;
+    if (pending_auto_return && input_cursor_mode != INPUT_OBJECT_CURSOR &&
+        object_on_cursor == OBJ_NULL) {
+        pending_auto_return = false;
+        if (touch.mode == TOUCH_GAMEPLAY) request_mode(true);
+        else touch_set_mode(&touch, TOUCH_GAMEPLAY);
+    }
     /* Original game interactions may deliberately leave freelook. Respect
        that transition and require a fresh toggle before gameplay gestures. */
     if (requested_look && !mlook_enabled && available && !controller_connected) {
         requested_look = false;
         touch_set_mode(&touch, TOUCH_CURSOR);
     }
-    enabled = enabled && w > 0 && h > 0 && sx > 0 && sy > 0;
     bool movie = enabled && _current_loop == CUTSCENE_LOOP && !(_change_flag & GL_CHG_LOOP);
     if (movie != movie_tap_enabled) touch_movie_tap_reset(&movie_tap);
     movie_tap_enabled = movie;
@@ -232,7 +292,10 @@ void touch_bridge_sync(void) {
     /* Preserve Alpha 1 look sensitivity: surface deltas become the same
        logical pixel deltas as before, without clamping motion in the bars. */
     touch.look_scale = sx > 0 ? 1.0f / sx : 1.0f;
-    touch.layout.move_radius = h * sy * .11f;
+    if (touch.stick_reference_height!=h*sy) {
+        touch.stick_reference_height=h*sy;
+        touch_layout_refresh(&touch);
+    }
     if (!available || controller_connected) requested_look = false;
 #if defined(__ANDROID__) && defined(TOUCH_DEBUG)
     log_touch_state();
@@ -274,10 +337,14 @@ void touch_bridge_event(const SDL_Event *event) {
             }
             return;
         }
-        if (surface.phase == TOUCH_DOWN && touch.enabled && touch.effective_mode == TOUCH_GAMEPLAY)
+        if (surface.phase == TOUCH_DOWN && touch.enabled && touch.effective_mode == TOUCH_GAMEPLAY &&
+            touch.panel==TOUCH_UI_CLOSED)
             request_mode(true);
+        TouchMode before_mode = touch.mode;
         touch_finger(&touch, surface.phase, surface.device, surface.finger,
                      surface.x, surface.y, surface.sample_ms);
+        if (touch.mode != before_mode)
+            touch_use_pending = pending_auto_return = false;
         if (touch.move_owner < 0) clear_movement();
         return;
     }

@@ -1,4 +1,6 @@
 #include "touch_shock_bridge.h"
+#include "input.h"
+#include "../touch_shock_bridge.c"
 #include "touch_surface.h"
 #include "physics.h"
 #include "mainloop.h"
@@ -14,6 +16,8 @@ SDL_Renderer *renderer=&render;
 static TestMap map;
 TestMap *global_fullmap=&map;
 int mlook_enabled;
+int input_cursor_mode;
+short object_on_cursor;
 bool TriggerRelMouseMode;
 uchar game_paused, wrapper_panel_on, olh_overlay_on, physics_running=1, time_passes=1;
 short _current_loop=GAME_LOOP;
@@ -95,6 +99,7 @@ static void reset(void) {
     flags=SDL_WINDOW_INPUT_FOCUS; map.cyber=0; game_paused=wrapper_panel_on=olh_overlay_on=0;
     physics_running=time_passes=1; _current_loop=GAME_LOOP; _change_flag=0;
     mlook_enabled=0; axes[0]=axes[1]=0;
+    input_cursor_mode=INPUT_NORMAL_CURSOR; object_on_cursor=OBJ_NULL;
     nx=1024; ny=768;
     center_warps=relative_off=0;
     touch_bridge_init(); touch_bridge_controller(false); touch_bridge_sync();
@@ -284,6 +289,141 @@ static void cursor_regions(void) {
     finger(SDL_FINGERUP,41,.6f,.5f);
     assert(event_count==2 && events[0]==1 && events[1]==-1);
 }
+static void touch_world_item_auto_return(void) {
+    /* Original pickup commits during uiPoll, after the touch USE sequence. */
+    reset();
+    finger(SDL_FINGERDOWN,1,.69f,.85f);
+    finger(SDL_FINGERUP,1,.69f,.85f);
+    assert(event_count==4 && touch.mode==TOUCH_GAMEPLAY);
+    object_on_cursor=17; input_cursor_mode=INPUT_OBJECT_CURSOR;
+    mlook_enabled=0; touch_bridge_after_input();
+    assert(touch.mode==TOUCH_CURSOR && !mlook_enabled);
+    touch_bridge_sync(); /* still attached: never restore LOOK */
+    assert(touch.mode==TOUCH_CURSOR && !mlook_enabled);
+    object_on_cursor=OBJ_NULL; touch_bridge_sync();
+    assert(touch.mode==TOUCH_CURSOR && !mlook_enabled);
+    object_on_cursor=OBJ_NULL; input_cursor_mode=INPUT_NORMAL_CURSOR;
+    touch_bridge_sync(); /* inventory_add_object -> pop_cursor_object */
+    assert(touch.mode==TOUCH_GAMEPLAY && mlook_enabled);
+
+    reset();
+    finger(SDL_FINGERDOWN,2,.69f,.85f); finger(SDL_FINGERUP,2,.69f,.85f);
+    object_on_cursor=18; input_cursor_mode=INPUT_OBJECT_CURSOR;
+    mlook_enabled=0; touch_bridge_after_input();
+    assert(touch.mode==TOUCH_CURSOR);
+    object_on_cursor=OBJ_NULL; input_cursor_mode=INPUT_NORMAL_CURSOR;
+    touch_bridge_sync(); /* successful player_throw_object -> pop_cursor_object */
+    assert(touch.mode==TOUCH_GAMEPLAY && mlook_enabled);
+
+    reset();
+    finger(SDL_FINGERDOWN,3,.85f,.08f); finger(SDL_FINGERUP,3,.85f,.08f);
+    assert(touch.mode==TOUCH_CURSOR);
+    object_on_cursor=19; input_cursor_mode=INPUT_OBJECT_CURSOR;
+    touch_bridge_after_input();
+    object_on_cursor=OBJ_NULL; input_cursor_mode=INPUT_NORMAL_CURSOR;
+    touch_bridge_sync();
+    assert(touch.mode==TOUCH_CURSOR && !mlook_enabled);
+
+    /* A failed USE, a normal world use, and a container item tap never arm. */
+    reset();
+    finger(SDL_FINGERDOWN,4,.69f,.85f); finger(SDL_FINGERUP,4,.69f,.85f);
+    touch_bridge_after_input();
+    assert(touch.mode==TOUCH_GAMEPLAY && mlook_enabled);
+    object_on_cursor=20; input_cursor_mode=INPUT_OBJECT_CURSOR;
+    mlook_enabled=0; touch_bridge_sync();
+    object_on_cursor=OBJ_NULL; input_cursor_mode=INPUT_NORMAL_CURSOR;
+    touch_bridge_sync();
+    assert(touch.mode==TOUCH_CURSOR && !mlook_enabled);
+    reset();
+    finger(SDL_FINGERDOWN,5,.85f,.08f); finger(SDL_FINGERUP,5,.85f,.08f);
+    cursor_target=TOUCH_TARGET_UI_OBJECT;
+    finger(SDL_FINGERDOWN,6,.5f,.5f); finger(SDL_FINGERUP,6,.5f,.5f);
+    assert(event_count==4);
+    object_on_cursor=21; input_cursor_mode=INPUT_OBJECT_CURSOR;
+    touch_bridge_after_input();
+    object_on_cursor=OBJ_NULL; input_cursor_mode=INPUT_NORMAL_CURSOR;
+    touch_bridge_sync();
+    assert(touch.mode==TOUCH_CURSOR);
+}
+
+static void touch_world_item_reset(void) {
+    for (int reason=0; reason<7; ++reason) {
+        reset();
+        finger(SDL_FINGERDOWN,30,.69f,.85f); finger(SDL_FINGERUP,30,.69f,.85f);
+        object_on_cursor=22; input_cursor_mode=INPUT_OBJECT_CURSOR;
+        mlook_enabled=0; touch_bridge_after_input();
+        assert(touch.mode==TOUCH_CURSOR);
+        switch (reason) {
+        case 0: game_paused=1; touch_bridge_sync(); game_paused=0; break;
+        case 1: wrapper_panel_on=1; touch_bridge_sync(); wrapper_panel_on=0; break;
+        case 2: _current_loop=CUTSCENE_LOOP; touch_bridge_sync(); _current_loop=GAME_LOOP; break;
+        case 3: lifecycle(SDL_WINDOWEVENT,SDL_WINDOWEVENT_FOCUS_LOST);
+                lifecycle(SDL_WINDOWEVENT,SDL_WINDOWEVENT_FOCUS_GAINED); break;
+        case 4: lifecycle(SDL_APP_WILLENTERBACKGROUND,0);
+                lifecycle(SDL_APP_DIDENTERFOREGROUND,0); break;
+        case 5: touch_bridge_controller(true); touch_bridge_controller(false); break;
+        case 6: nx++; touch_bridge_sync(); break;
+        }
+        object_on_cursor=OBJ_NULL; input_cursor_mode=INPUT_NORMAL_CURSOR;
+        touch_bridge_sync();
+        assert(touch.mode==TOUCH_CURSOR && !mlook_enabled);
+    }
+    reset();
+    finger(SDL_FINGERDOWN,31,.69f,.85f); finger(SDL_FINGERUP,31,.69f,.85f);
+    object_on_cursor=23; input_cursor_mode=INPUT_OBJECT_CURSOR;
+    mlook_enabled=0; touch_bridge_after_input();
+    touch_bridge_cancel();
+    object_on_cursor=OBJ_NULL; input_cursor_mode=INPUT_NORMAL_CURSOR;
+    touch_bridge_sync();
+    assert(touch.mode==TOUCH_CURSOR && !mlook_enabled);
+}
+static void settings_overlay_lifecycle(void) {
+    for (int editor=0;editor<2;editor++) for (int reason=0;reason<8;reason++) {
+        reset();
+        touch.settings.opacity=.65f;
+        move(); finger(SDL_FINGERDOWN,2,.86f,.73f);
+        finger(SDL_FINGERDOWN,3,.16f,.06f);
+        assert(touch.panel==TOUCH_UI_SETTINGS && !mlook_enabled && !buttons && !axes[0] && !axes[1]);
+        if (editor) touch_ui_action(&touch,TU_EDIT);
+        touch_ui_action(&touch,TU_OPACITY_UP);
+        int events_before=event_count;
+        finger(SDL_FINGERMOTION,2,.9f,.7f); finger(SDL_FINGERUP,2,.9f,.7f);
+        assert(event_count==events_before && !buttons);
+        switch (reason) {
+        case 0: lifecycle(SDL_WINDOWEVENT,SDL_WINDOWEVENT_FOCUS_LOST); break;
+        case 1: lifecycle(SDL_APP_WILLENTERBACKGROUND,0); break;
+        case 2: touch_bridge_controller(true); break;
+        case 3: nx++; touch_bridge_sync(); break;
+        case 4: touch_bridge_cancel(); break;
+        case 5: game_paused=1; touch_bridge_sync(); break;
+        case 6: olh_overlay_on=1; touch_bridge_sync(); break;
+        case 7: _current_loop=4; touch_bridge_sync(); break;
+        }
+        assert(touch.panel==TOUCH_UI_CLOSED && fabsf(touch.settings.opacity-.65f)<.0001f);
+        assert(!touch.ui_owned && !touch.fire_count && !touch.sprint_latched);
+        game_paused=olh_overlay_on=0; _current_loop=GAME_LOOP;
+        lifecycle(SDL_APP_DIDENTERFOREGROUND,0);
+        lifecycle(SDL_WINDOWEVENT,SDL_WINDOWEVENT_FOCUS_GAINED);
+        touch_bridge_controller(false);
+        finger(SDL_FINGERMOTION,2,.9f,.7f); finger(SDL_FINGERUP,2,.9f,.7f);
+        assert(!buttons && !axes[0] && !axes[1]);
+    }
+    reset();
+    finger(SDL_FINGERDOWN,1,.85f,.08f); finger(SDL_FINGERUP,1,.85f,.08f);
+    finger(SDL_FINGERDOWN,2,.16f,.06f); finger(SDL_FINGERUP,2,.16f,.06f);
+    touch_ui_action(&touch,TU_CANCEL);
+    assert(touch.mode==TOUCH_CURSOR && !mlook_enabled);
+    /* Entering the new modal has the same cancellation rule as original UI. */
+    reset();
+    finger(SDL_FINGERDOWN,4,.69f,.85f); finger(SDL_FINGERUP,4,.69f,.85f);
+    object_on_cursor=24; input_cursor_mode=INPUT_OBJECT_CURSOR;
+    mlook_enabled=0; touch_bridge_after_input();
+    assert(pending_auto_return);
+    touch_ui_open(&touch); assert(!pending_auto_return);
+    touch_ui_action(&touch,TU_CANCEL);
+    object_on_cursor=OBJ_NULL; input_cursor_mode=INPUT_NORMAL_CURSOR;
+    touch_bridge_sync(); assert(touch.mode==TOUCH_CURSOR && !mlook_enabled);
+}
 static void cutscene_touch_skip(void) {
     reset();
     _current_loop=CUTSCENE_LOOP;
@@ -317,5 +457,7 @@ static void cutscene_touch_skip(void) {
 }
 int main(void) {
     aim_and_actions(); movement_and_lifecycle(); cursor_fallback(); full_surface_and_transition(); alpha2_actions(); cursor_regions(); cutscene_touch_skip();
-    puts("TOUCH_BRIDGE_TESTS=PASS (6 groups, Alpha 2 actions, cutscene tap, lifecycle and surface integration)"); return 0;
+    touch_world_item_auto_return(); touch_world_item_reset();
+    settings_overlay_lifecycle();
+    puts("TOUCH_BRIDGE_TESTS=PASS (Alpha 2 actions, cutscene tap, item return, lifecycle and surface integration)"); return 0;
 }

@@ -7,6 +7,8 @@
 
 void touch_bridge_init(void);
 void touch_bridge_sync(void);
+/* Resolve touch USE after the original UI queue has dispatched it. */
+void touch_bridge_after_input(void);
 void touch_bridge_event(const SDL_Event *event);
 void touch_bridge_controller(bool connected);
 void touch_bridge_cancel(void);

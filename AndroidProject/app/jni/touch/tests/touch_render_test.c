@@ -11,6 +11,8 @@ static SDL_BlendMode blend=SDL_BLENDMODE_ADD;
 static SDL_Rect clip={11,22,33,44};
 static SDL_bool clipped=SDL_TRUE;
 static int draws, fire_center_lines;
+static Uint8 max_alpha;
+static FILE *capture;
 static TouchControls t;
 static float sx=1.25f, sy=1.25f;
 static SDL_Rect viewport={320,0,1280,960};
@@ -41,15 +43,26 @@ int SDL_GetRenderDrawBlendMode(SDL_Renderer *r,SDL_BlendMode *b) {(void)r; *b=bl
 int SDL_SetRenderDrawBlendMode(SDL_Renderer *r,SDL_BlendMode b) {(void)r; blend=b; return 0;}
 int SDL_RenderDrawLineF(SDL_Renderer *r,float x1,float y1,float x2,float y2) {
     (void)r; assert(!clipped && blend==SDL_BLENDMODE_BLEND); draws++;
+    if (color[3]>max_alpha) max_alpha=color[3];
+    if (capture) fprintf(capture,"[\"line\",%u,%u,%u,%u,%.3f,%.3f,%.3f,%.3f]\n",
+        color[0],color[1],color[2],color[3],x1,y1,x2,y2);
     assert(sx==1 && sy==1 && viewport.x==0 && viewport.w==1920);
     if(y1==t.layout.fire.y && y2==y1 && x1<t.layout.fire.x && x2>t.layout.fire.x) fire_center_lines++;
     return 0;
 }
 int SDL_RenderFillRectF(SDL_Renderer *r,const SDL_FRect *rect) {
-    (void)r; (void)rect; assert(!clipped && blend==SDL_BLENDMODE_BLEND); draws++; return 0;
+    (void)r; (void)rect; assert(!clipped && blend==SDL_BLENDMODE_BLEND); draws++;
+    if (color[3]>max_alpha) max_alpha=color[3];
+    if (capture) fprintf(capture,"[\"fill\",%u,%u,%u,%u,%.3f,%.3f,%.3f,%.3f]\n",
+        color[0],color[1],color[2],color[3],rect->x,rect->y,rect->w,rect->h);
+    return 0;
 }
 int SDL_RenderDrawRectF(SDL_Renderer *r,const SDL_FRect *rect) {
-    return SDL_RenderFillRectF(r,rect);
+    (void)r; draws++;
+    if (color[3]>max_alpha) max_alpha=color[3];
+    if (capture) fprintf(capture,"[\"outline\",%u,%u,%u,%u,%.3f,%.3f,%.3f,%.3f]\n",
+        color[0],color[1],color[2],color[3],rect->x,rect->y,rect->w,rect->h);
+    return 0;
 }
 static void restored(void) {
     assert(color[0]==12 && color[1]==34 && color[2]==56 && color[3]==78);
@@ -57,7 +70,7 @@ static void restored(void) {
     assert(blend==SDL_BLENDMODE_ADD);
     assert(sx==1.25f && sy==1.25f && viewport.x==320 && viewport.w==1280 && viewport.h==960);
 }
-int main(void) {
+int main(int argc,char **argv) {
     touch_init(&t,NULL,NULL); touch_configure(&t,1920,960,true,true,false);
     touch_draw(&t,NULL); assert(draws>0 && fire_center_lines>0); restored();
     assert(t.layout.fire.x>1600); /* fire is drawn/hit in the right black bar */
@@ -69,5 +82,29 @@ int main(void) {
     touch_draw(&t,NULL); assert(!draws); restored();
     touch_configure(&t,1024,768,true,false,false); draws=0;
     touch_draw(&t,NULL); assert(!draws); restored(); /* movie/menu: no overlay */
-    puts("TOUCH_RENDER_TESTS=PASS (4 groups)"); return 0;
+    touch_configure(&t,1920,960,true,true,false);
+    t.settings.opacity=.25f; max_alpha=0;
+    touch_draw(&t,NULL); assert(max_alpha<=64); restored();
+    touch_ui_open(&t); max_alpha=0;
+    touch_draw(&t,NULL); assert(max_alpha==255); restored(); /* panel remains readable */
+    touch_ui_action(&t,TU_EDIT); t.selected=TC_FIRE; draws=fire_center_lines=0;
+    touch_ui_action(&t,TU_SCALE_UP);
+    touch_draw(&t,NULL); assert(fire_center_lines>0); restored();
+    touch_ui_action(&t,TU_DOCK);
+    touch_draw(&t,NULL); restored();
+    if (argc==2) {
+        static const char *names[]={"gameplay","settings","editor-center","editor-top"};
+        for (int i=0;i<4;i++) {
+            char filename[1024];
+            snprintf(filename,sizeof(filename),"%s-%s.jsonl",argv[1],names[i]);
+            capture=fopen(filename,"wb"); assert(capture);
+            touch_init(&t,NULL,NULL); touch_configure(&t,1920,960,true,true,false);
+            if (i>0) touch_ui_open(&t);
+            if (i>1) touch_ui_action(&t,TU_EDIT);
+            if (i>2) touch_ui_action(&t,TU_DOCK);
+            touch_draw(&t,NULL); restored();
+            fclose(capture); capture=NULL;
+        }
+    }
+    puts("TOUCH_RENDER_TESTS=PASS (surface restore, geometry, suppression, opacity, settings/editor)"); return 0;
 }
