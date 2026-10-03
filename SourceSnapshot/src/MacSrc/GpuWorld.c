@@ -34,6 +34,7 @@ extern uchar full_game_3d;
 extern char curr_clut_table;
 extern uchar view360_is_rendering;
 extern uchar view360_render_on;
+extern uchar wrapper_panel_on;
 extern int _game_fr_tmap;
 extern int secret_render_fx;
 
@@ -496,6 +497,10 @@ int gpu_world_begin(void) {
      * In particular a sequential rear view must not discard a primary image
      * after its software world has been replaced by the UI sentinel. */
     if(previous||(_fr_curflags&(FR_PICKUPM_MASK|FR_HACKCAM_MASK|FR_CURVIEW_MASK))||view360_is_rendering)return previous;
+    /* The options wrapper snapshots/restores indexed screen pixels. Its entry
+     * sets this flag before render_run, so supply a fresh software background
+     * rather than letting the snapshot retain index255 GPU world placeholders. */
+    if(wrapper_panel_on){retained=command_valid=0;log_fallback("menu requires indexed software background");return previous;}
     if(view360_render_on){retained=command_valid=0;log_fallback("sensaround requires whole-frame software");return previous;}
     if(secret_render_fx){retained=command_valid=0;log_fallback("software framebuffer transition");return previous;}
     unsigned excluded=FR_PICKUPM_MASK|FR_HACKCAM_MASK|FR_PALETTE_MASK|FR_NORENDR_MASK|FR_SOLIDFR_MASK|FR_SFX_MASK|FR_OVERLAY_MASK|FR_CURVIEW_MASK;

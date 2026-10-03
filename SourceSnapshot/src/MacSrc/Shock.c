@@ -53,6 +53,11 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "shockolate_version.h"
 #include "status.h"
 #include "version.h"
+#if defined(RP5NP_QA_TOOLS) && defined(RP5NP_GPU_WORLD)
+#include <stdio.h>
+#include <string.h>
+#include "palfx.h"
+#endif
 
 //--------------------
 //  Globals
@@ -548,6 +553,51 @@ void SetSDLPalette(int index, int count, uchar *pal) {
         opengl_change_palette();
 }
 
+#if defined(RP5NP_QA_TOOLS) && defined(RP5NP_GPU_WORLD)
+/* Controlled original palette fade on an already presented GPU world. The
+ * marker is sampled once on the first eligible bright normal-game frame. */
+static void qa_gpu_palette_fade(int gpu_composed) {
+    static int checked, running, last_composed;
+    uchar saved[768], observed[768];
+    unsigned brightest=0;
+    if(running){last_composed=gpu_composed;return;}
+    if(checked||!gpu_composed||UseCutscenePalette||
+       (_current_loop!=GAME_LOOP&&_current_loop!=FULLSCREEN_LOOP))return;
+    gr_get_pal(0,256,saved);
+    for(size_t i=0;i<sizeof(saved);i++)if(saved[i]>brightest)brightest=saved[i];
+    if(!brightest)return;
+    checked=1;
+    FILE *marker=fopen("gpu-render4-test-fade.txt","r");
+    if(!marker)return;
+    fclose(marker);
+    /* finish_pal_effect calls SDLDraw recursively; arm before the original API. */
+    running=1;last_composed=gpu_composed;
+    SDL_Log("GPU4 QA FADE begin gpu=%d palette_max=%u",gpu_composed,brightest);
+    palfx_fade_down();
+    last_composed=0;
+    SDLDraw();
+    gr_get_pal(0,256,observed);brightest=0;
+    for(size_t i=0;i<sizeof(observed);i++)if(observed[i]>brightest)brightest=observed[i];
+    SDL_Log("GPU4 QA FADE legacy_end gpu=%d palette_max=%u hold_ms=500",last_composed,brightest);
+    SDL_Delay(500);
+    /* Separately test exact black; do not change the original fade endpoint. */
+    memset(observed,0,sizeof(observed));
+    gr_set_pal(0,256,observed);
+    last_composed=0;
+    SDLDraw();
+    gr_get_pal(0,256,observed);brightest=0;
+    for(size_t i=0;i<sizeof(observed);i++)if(observed[i]>brightest)brightest=observed[i];
+    SDL_Log("GPU4 QA FADE exact_black gpu=%d palette_max=%u hold_ms=500",last_composed,brightest);
+    SDL_Delay(500);
+    gr_set_pal(0,256,saved);
+    last_composed=0;
+    SDLDraw();
+    gr_get_pal(0,256,observed);
+    SDL_Log("GPU4 QA FADE end gpu=%d palette_restored=%d",last_composed,memcmp(saved,observed,sizeof(saved))==0);
+    running=0;
+}
+#endif
+
 void SDLDraw() {
 #ifdef RP5NP_GPU_WORLD
     if(renderer && !presenter_reset_pending && presenter_context!=SDL_GL_GetCurrentContext())
@@ -592,6 +642,9 @@ void SDLDraw() {
     uint64_t visual_submitted=visual_start ? horror_visuals_clock() : 0;
     SDL_RenderPresent(renderer);
     horror_visuals_present_measure(visual_start,visual_converted,visual_submitted);
+#if defined(RP5NP_QA_TOOLS) && defined(RP5NP_GPU_WORLD)
+    qa_gpu_palette_fade(gpu_composed);
+#endif
 }
 
 bool MouseCaptured = FALSE;

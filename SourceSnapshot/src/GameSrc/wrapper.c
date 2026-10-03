@@ -1866,6 +1866,20 @@ static void visuals_button_toggle(uchar butid) {
      * Corner intensities are recomputed each draw; no level reload is needed. */
     uiHideMouse(NULL);
     render_run();
+    /* Keep the stored menu background in the newly selected presentation mode.
+     * GPU mode supplies a complete software view while this panel is open. */
+    if (full_game_3d) {
+#ifdef SVGA_SUPPORT
+        uchar old_over = gr2ss_override;
+        gr2ss_override = OVERRIDE_ALL;
+#endif
+        gr_push_canvas(grd_screen_canvas);
+        ss_get_bitmap(&inv_view360_canvas.bm, GAME_MESSAGE_X, GAME_MESSAGE_Y);
+        gr_pop_canvas();
+#ifdef SVGA_SUPPORT
+        gr2ss_override = old_over;
+#endif
+    }
     opanel_redraw(TRUE);
     uiShowMouse(NULL);
 }
