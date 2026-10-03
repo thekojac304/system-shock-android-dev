@@ -4,7 +4,7 @@ GPU-RENDER2 / GPU-RENDER3 / GPU-RENDER4 -- CONSOLIDATED QA
 WORKING CHECKPOINT -- NOT FINAL CAMPAIGN ACCEPTANCE
 
 GPU-RENDER2: PASS, bounded normal-terrain/texture gate with safe fallback.
-GPU-RENDER3: NOT ENTERED; source inventory only.
+GPU-RENDER3: PASS, bounded ordinary-object/model/ordering gate with safe fallback.
 GPU-RENDER4: NOT ENTERED; source inventory and safety containment only.
 GPU-RENDER5: NOT STARTED; not recommended before the renderer gates pass.
 
@@ -14,7 +14,10 @@ geometry, with transient conservative software fallbacks explicitly recorded.
 Flight animated terrain master237 now has visible original-content animation
 and four distinct128x128 indexed hashes on successfully composed GPU frames.
 The same passage was compared with Original. This closes the final Phase2
-requirement; Phase3 may begin after the focused Phase2 checkpoint commit.
+requirement; Phase2 was committed before Phase3 began.
+Phase3 now passes with sections26..29 evidence. Earlier IN PROGRESS statements
+below are historical capture-time status; sections5/6/29 are the current gate.
+Phase4 remains NOT ENTERED until the focused Phase3 PASS commit.
 The primary agent will update the device results, gate decisions and closeout
 fields below as testing continues.
 
@@ -62,11 +65,15 @@ dist/ or normal ignored build output; they must not enter a phase commit.
 
 2. PHASE COMMITS / BUILD PROVENANCE
 
-Phase commits: Phase2 PASS is recorded; its focused commit is pending below.
+GPU-RENDER2 commit: bcc842c4bd38a95b5fd4ff6dc8e6598ec854ef84
+  Expand GLES terrain and indexed texture parity with safe fallback
+ 13 renderer/report/helper files only; unrelated AUDIO work remains unstaged.
+GPU-RENDER3 commit: pending focused Phase3 PASS commit.
+GPU-RENDER4 commit: none; gate NOT ENTERED.
 No push has been performed or authorized. A successful phase should receive a
 focused renderer-only commit if it can be staged cleanly.
 
-Current renderer manifest for a future focused commit:
+Historical Phase2 renderer manifest (already committed):
   AndroidProject/app/jni/CMakeLists.txt
   SourceSnapshot/src/MacSrc/GpuWorld.c
   SourceSnapshot/src/MacSrc/GpuWorld.h
@@ -82,7 +89,12 @@ Current renderer manifest for a future focused commit:
   docs/GPU_RENDER2_3_4_QA.txt
 Confirm the final diff before staging; this is a manifest, not a claim it is staged.
 
-Latest built/installed candidate at this checkpoint: build9, QA arm64-v8a.
+Latest built/installed candidate: build10, QA arm64-v8a; section29 records
+the exact hash, verification, focused model tests and device evidence.
+Phase3 focused files: GpuGeometry.h, GpuWorld.c, gpu_geometry_test.c,
+scripts/test-gpu-render2.py and this report. Confirm the actual diff at staging.
+
+Earlier build9 candidate, used for Phase2 and initial Phase3 routes:
   C:\Dev\system-shock-android\AndroidProject\app\build\outputs\apk\qa\app-qa.apk
   SHA256 b530bf390250143c18575377329bc46507a316464802ed7b5688246b9f8da836
   BUILD=PASS in8s; evidence: dist/gpu-render2-3-4/build9.log.
@@ -212,15 +224,18 @@ accepts dependable supported terrain with explicit whole-view fallback, not
 all-frame GPU coverage. Recorded topology fallbacks, sky/special exclusions,
 separate moving-ceiling and exhaustive viewpoint limits remain in9/13/21/23.
 Cache pressure/eviction is covered by the existing10,000-frame helper test;
-the actual routes stayed below capacity and do not prove device-side eviction.
+the Phase2 routes stayed below capacity. Later Phase3 device-side eviction is
+recorded separately in section26.
 Existing matched performance and controlled context evidence are reused.
 
 5. GPU-RENDER3 SUMMARY
 
-NOT ENTERED. No Phase3 implementation/acceptance claim is made.
-Section10 inventories existing object emission paths; section11 inventories
-transparency classes. Broader enemy species, object ordering, animation,
-door CLOSE and model parity require their own later gate.
+PASS after the Phase2 commit and build10 model confirmation. Sections26..29
+cover assassin/warrior animation and cutouts, wall/corner and full Flight door
+occlusion, Medical pickup/control alignment, inherited servbot lighting, and
+ordinary flat/textured model geometry. Unsupported output keeps complete-view
+software fallback. This is bounded route acceptance, not every enemy/frame,
+model, translucency class or special transition certification.
 
 Inherited 1B evidence: one normally encountered servbot accepted qualitatively
 by the user in the bounded GPU-lit Medical suite; controls/pickups and door OPEN
@@ -230,10 +245,14 @@ substitute for entering and completing the Phase3 object acceptance plan.
 
 6. GPU-RENDER3 GATE / CHECKPOINT
 
-Gate: NOT ENTERED / NOT PASSED.
-Multiple species, ordinary model/polygon routes, doorway/corner occlusion,
-door CLOSE, transparency ordering and unsupported-view fallback still require
-the planned Phase3 evidence. No Phase3 commit exists.
+Gate: PASS for bounded ordinary objects/models with explicit safe fallback.
+Sections26..29 establish multiple normal species, pickup/control alignment,
+complete OPEN/CLOSE motion, ordinary flat/textured models, corner/door occlusion,
+and cutouts. No fundamental ordering defect or silent omission was found.
+Unsupported representations still reject the whole view; Original and runtime
+switching remain intact. The focused Phase3 commit follows this gate decision.
+Earlier IN PROGRESS statements below are historical observations at their time;
+this current gate and section29 supersede them.
 
 7. GPU-RENDER4 SUMMARY
 
@@ -500,14 +519,13 @@ No artificial enemy spawn or relocation is claimed by this checkpoint.
 15. DOOR OPEN / CLOSE RESULT
 
 INHERITED: bounded Medical supply-door OPEN and interaction passed in1B.
-INHERITED GAP: CLOSE animation remained inconclusive at1B closeout.
-
-This draft does not infer OPEN/CLOSE success from saved image names. Source uses
-current original door frame/geometry every capture; that is not motion acceptance.
-The Phase2 route used normal elevator controls and traveled between decks,
-but a complete recorded OPEN -> open -> CLOSE -> closed cycle with correct
-ordering, cutout, picking and no stale geometry still needs an explicit result.
-Door CLOSE acceptance for Phase3 remains UNVERIFIED in this checkpoint.
+The inherited CLOSE evidence gap is now RESOLVED for the actual Flight
+EXECUTIVE DOOR tested in Phase3, not retroactively for the Medical supply door.
+A continuous normal-USE recording shows closed -> OPEN -> open -> CLOSE ->
+closed, with room contents correctly revealed/hidden and no observed stale
+hole/frame or through-wall object leak. Section27 records exact files and
+intervals. This accepts motion/occlusion for that door, not all door classes,
+all picking cases or the bespoke Medical light-portal behavior.
 
 16. CACHE / LIFETIME DESIGN
 
@@ -1103,7 +1121,8 @@ moving-floor and Flight indexed-content animation evidence now pass. This is
 not all-frame GPU, separate moving-ceiling, or enemy-behavior certification.
 
 Remaining later-phase work:
-- Multiple enemy species/ordinary models and complete door CLOSE/occlusion QA.
+- Multiple enemy species/ordinary models and broader doorway/corner occlusion;
+  the tested Flight door's full OPEN/CLOSE cycle passes (section27).
 - Common transparency ordering and explicit deferred-class validation.
 - Nested/secondary view ownership beyond conservative software containment.
 - Menu/snapshot source semantics independent of retained GPU holes.
@@ -1124,7 +1143,7 @@ Current answer: Is GLES3 dependable enough for normal-game Enhanced use across
 terrain, ordinary objects/enemies and common transitions with safe fallback?
 PARTIALLY. General terrain capture, bounded cache and explicit failure fallback
 are implemented; helper tests and route evidence pass the bounded Phase2 gate.
-Phases3/4 have not been entered. This is not a normal-game
+Phase3 is in progress and Phase4 has not been entered. This is not a normal-game
 renderer maturity certification.
 
 Current answer: Is it mature enough to begin GPU-RENDER5 profile-driven horror
@@ -1153,3 +1172,177 @@ to unlock or operate the phone now, and does not replace missing automated QA.
 Final closeout must update the working status at the top, sections2/4/6/8,
 exact observed route details, device-setting restoration and the acceptance
 answers. Do not treat this intermediate draft as three completed phases.
+
+26. PHASE3 DEVICE EVIDENCE: FLIGHT ASSASSIN / CACHE PRESSURE
+
+Gate status remains Phase3 IN PROGRESS / NOT PASSED; Phase4 NOT ENTERED.
+This bounded review adds evidence, not completion of the ordinary-object gate.
+
+Evidence files (all ignored, under dist/gpu-render2-3-4/):
+- assassin-sheet-0.jpg: sampled motion from 0.000 through 1.875 seconds.
+- assassin-sheet-1.jpg: sampled motion from 2.000 through 3.875 seconds.
+- phase3-assassin-motion.log: renderer/fallback and cache records below.
+
+Normal combat difficulty2 was retained. The player died after approximately
+four seconds; no assassin hit or kill is claimed. The green projectile visible
+at 3.000..3.625 seconds establishes a firing effect only.
+
+The inspected sheets show distinct assassin arm/rifle/leg silhouettes after
+unpausing, including 0.625..1.125 and 2.125..2.625 seconds, plus firing flashes
+around 1.000 and 2.875 seconds. Background remains visible around the cutout
+limbs/rifle; no opaque sprite rectangle, obvious missing torso/limbs or
+persistent sprite disappearance is apparent. The left crate stays solid and
+the adjoining wall/floor boundaries remain coherent. No clear ordering
+inversion was found, but these samples do not establish a complete pass behind
+the crate or certify every animation frame. The 0.125-second sampling also
+cannot rule out defects between samples.
+
+This is mixed GPU/software evidence, not uninterrupted GPU animation:
+- 17:33:56.871/.887: crate object200, six-vertex projected boundaries rejected
+  for non-convex topology; explicit whole-view SOFTWARE at .872
+  (log lines2706..2720).
+- 17:33:57.320: GPU1B LIVE frame10200, 86 draws/174 triangles, uploads0,
+  confirms successful GPU recovery (line2727).
+- 17:33:57.565: explicit excluded-view/effect software fallback (line2729).
+- 17:33:59.466: explicit software framebuffer transition (line2743), followed
+  by cutscene audio opening at 17:34:00.005.
+Sparse success/fallback logs do not identify the renderer for every individual
+sheet frame. No new visible omission/order blocker was found in this review;
+the crate topology fallback and incomplete occlusion coverage remain explicit.
+
+Actual device LRU pressure is now observed, beyond the standalone helper test:
+phase3-assassin-motion.log line2728, 17:33:57.320, records 512 resident entries,
+568 misses, 56 evictions, zero rejections, 1,361,015 resident bytes and
+1,363,348 peak bytes. The adjacent successful GPU frame establishes continued
+submission after cumulative eviction; it does not independently prove every
+eviction/replay path or the full 16MiB byte-budget boundary.
+
+This report append involved no source changes, retesting or device operations.
+
+27. PHASE3 DEVICE EVIDENCE: COMPLETE FLIGHT DOOR OPEN/CLOSE
+
+Bounded result: PASS for the tested Flight EXECUTIVE DOOR's complete motion
+and visible object occlusion. Phase3 remains IN PROGRESS / NOT PASSED;
+Phase4 remains NOT ENTERED.
+
+Evidence, all ignored under dist/gpu-render2-3-4/:
+phase3-door-cycle.mp4, door-sheet-0.jpg through door-sheet-3.jpg (decoded at
+12fps), and phase3-door-cycle.log. The primary reviewer examined the continuous
+recording; independent review of sheets1..3 confirmed the visible sequence.
+Normal USE toggles were used. The final recorded player camera is
+(33.1851,40.6904), heading192.094 on Flight.
+
+The recording contains an earlier CLOSE at 2.417..2.917 seconds, followed by
+the complete measured cycle:
+- Closed: 3.000..3.667 seconds.
+- Opening: 3.750..4.333 seconds.
+- Open: 4.417..5.500 seconds.
+- Closing: 5.583..6.083 seconds.
+- Closed again: 6.167 seconds onward.
+
+The moving curved door boundary progressively reveals and conceals the
+furniture/table and corpse beyond the aperture. Wall/frame alignment remains
+coherent; no stale opening, stale door frame or through-wall object leakage
+was observed. The final closed image stays complete through the later pause.
+These are observed motion/ordering results, not conclusions from filenames.
+
+phase3-door-cycle.log line3172 records GPU1B LIVE at17:45:07.321, frame12900,
+119 draws/190 triangles, uploads0 and cumulative fallbacks434. Earlier route
+topology fallback at17:40:34 had count433, followed by one further fallback
+and recovery before this cycle. The count is already434 at17:43:59.272 and
+remains434 in the cycle's success sample; no fallback report occurs during
+the recorded cycle. This supports successful GPU door motion in this view,
+without claiming every animation pose has an individual GPU log entry.
+
+This Flight doorway is outside the authored Medical lighting region. The
+result does not certify bespoke Medical light-portal gating or leakage.
+The inherited general CLOSE gap is resolved for this tested door; remaining
+Phase3 model, species, transparency and broader occlusion work is unchanged.
+
+28. PHASE3 DEVICE EVIDENCE: WARRIOR CYBORG AND PICKING
+
+OBSERVED, build9: phase3-warrior-motion.mp4 and warrior-sheet-0..2.jpg (8fps)
+show the normally encountered Flight warrior cyborg303, class14/sub2/type1.
+The original campaign arrival save was restored only to campaign-owned slot04;
+combat difficulty remains2. The player opens the Executive Door, enters the
+adjoining furnished room and strafes. The cyborg is partly hidden by the wall
+at0.625..1.625s, disappears behind its edge, then emerges at2.125s and approaches
+with changing leg/arm poses through3.250s before leaving the left screen edge.
+Its solid body and cutout limbs remain coherent beside the table/chairs. No
+obvious wall leakage, detached sprite rectangle or incorrect foreground order
+was observed. No kill/hit claim is made. This supplements the new assassin
+recording and inherited bounded Medical servbot/color-light test.
+phase3-warrior-motion.log has GPU LIVE frame13500 at17:49:07.555,
+108 draws/162 triangles, uploads0, cumulative fallbacks435 (one more than the
+door sample); no claim that every sampled video frame is individually logged.
+The room also provides observed ordinary flat furniture/table geometry and
+textured tabletop, with wall/corpse/furniture order coherent during movement.
+
+OBSERVED, build9: normal cursor tap at the visible Medical supply-door wall
+control operates that door; phase3-control-picked.png captures the hand cursor
+over the control and the moving door. After reopening it and walking in, a tap
+on the displayed green/orange floor card identifies STANDARD ACCESS CARD and
+puts it on the original cursor (phase3-pickup-targets.png / selected.png).
+Dropping it into inventory yields New accesses gained: STD and removes that
+card from the floor (phase3-pickup-stored.png). Other floor items remain drawn.
+This verifies displayed GPU placement against the original software picking
+and normal inventory path. It is ordinary gameplay, not an edited inventory;
+no original user save was overwritten. The full filenames use prefix
+phase3-pickup- under the ignored evidence directory.
+phase3-picking.log records the Medical authored lights, GPU LIVE frame13800 at
+17:51:57.921,19 draws/41 triangles, uploads0 and unchanged fallbacks435.
+
+Phase3 remains IN PROGRESS / NOT PASSED pending the common-model topology
+implementation and focused device confirmation. Phase4 remains NOT ENTERED.
+
+29. PHASE3 MODEL IMPLEMENTATION / FINAL GATE EVIDENCE
+
+SOURCE: Model-only exact boundary validation and bounded ear clipping support
+simple concave3..32-vertex polygons. Existing valid fans preserve their original
+diagonals. Returned indices retain original vertices, UVs, lighting and painter
+order. Terrain keeps its strict convex guard. Crossing/touching/duplicate and
+zero-area models reject before command allocation, preserving whole-view
+software fallback. Gouraud, TLUC/translucent, invisible/special representations
+and alternate CLUT exclusions remain. No game data or gameplay was changed.
+
+TEST: Focused geometry helper PASS (geometry-test.log), covering actual object440,
+alternate diagonal, concave8/32 lists, winding/start changes, area/edge coverage,
+atomic rejection and int32 extremes. GpuWorld syntax PASS; scoped diff PASS.
+Only geometry tests were rerun because this source changed; cache tests remain
+inherited. __int128 is supported by the configured arm64 Android Clang build;
+no generic compiler portability claim is made.
+
+TEST: Build10 PASS in8s. apk-verification10.log confirms QA package
+io.github.raposomiguel50.systemshock.qa, version1.0.0-qa/10000,
+signer6dc6baad4199aaa7637cbbe2af679156eb48731b0eacdeabc0ffaa78adcd9924,
+and16-KiB ELF/ZIP alignment. Installed successfully on the same phone.
+APK: AndroidProject/app/build/outputs/apk/qa/app-qa.apk
+SHA256451f848fb40aa1411a0661ba90efc6231dd09af7c27f66f90f584f9da92814e7
+
+OBSERVED: The normal campaign-owned slot04 model-room checkpoint was saved at
+Medical(30.2617,29.7109),heading255,crouched,combat0. This is geometry evidence,
+not ordinary combat acceptance. Original's gray bent terminal silhouette,
+striped base and other textured console faces remain complete in GPU. The
+parent directly reviewed model-sheet0..2.jpg, from phase3-model-motion.mp4,
+with a short turn/strafe at0.500..4.875s. Models stay solid as their faces move
+across the view; wall edges occlude correctly, with no visible hole, UV jump or
+object omission. This covers the previously rejected common object440 model.
+phase3-model-original10.png and phase3-model-return10.png also confirm stable
+GPU->Original->GPU switching with the same static model shape and complete UI.
+
+TEST/OBSERVED: phase3-model-build10.log and phase3-model-motion.log record:
+18:08:41.577 frame1,44 draws/77 triangles,object440 captured,fallbacks0;
+18:08:46.587 frame300,44/77,uploads0,fallbacks0;
+18:09:29.690 frame600,24/45,uploads0,fallbacks0.
+The movement reaches tile30,30 with85 draws. Short timing windows give capture
+plus software means5.180/5.389ms,p95 up to6.624,p99 up to7.006; CPU submit
+means0.042/0.047ms,p95 up to0.099,p99 up to0.155. No obvious regression is
+apparent; these are a targeted smoke sample, not a new matched benchmark or GPU
+timer measurement. Existing baseline measurements are reused.
+
+Phase3 PASS uses this model result together with sections26..28 and inherited
+servbot/color-light evidence. Historical earlier pending Phase3 statements are
+superseded. Acceptance remains bounded: not every enemy species, model pose,
+transparency type or viewpoint is certified; explicit safe software fallback
+is intentional. Phase4 is still NOT ENTERED until the focused Phase3 commit.
+Phase5 is not implemented or recommended before Phase4 passes.

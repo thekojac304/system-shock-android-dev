@@ -5,6 +5,7 @@ install, app launch, app data, preferences, saves, security settings or original
 game resources are accessed. These are unit tests, not renderer parity evidence.
 Build/test logs and binaries stay in ignored dist/gpu-render2-3-4.
 """
+import argparse
 import hashlib
 import os
 from pathlib import Path
@@ -36,6 +37,10 @@ def check(result):
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--test', choices=('cache', 'geometry'),
+                        help='Run only this fixture; default runs both.')
+    args = parser.parse_args()
     sdk = Path(os.environ['LOCALAPPDATA']) / 'Android/Sdk'
     clang = sdk / 'ndk/29.0.14206865/toolchains/llvm/prebuilt/windows-x86_64/bin/clang.exe'
     adb = sdk / 'platform-tools/adb.exe'
@@ -52,6 +57,8 @@ def main():
     # particular, the cache fixture overrides malloc before including the .c
     # file to test allocation failure. Do not add that .c as a second input.
     for name, source_name, dependencies in TESTS:
+        if args.test and name != args.test:
+            continue
         source = ROOT / source_name
         binary = OUT / f'gpu-{name}-test'
         build = run([clang, '--target=aarch64-linux-android33', '-std=c11',

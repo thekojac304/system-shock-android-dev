@@ -396,8 +396,8 @@ static void log_polygon_topology(int n,g3s_phandle *p,const int32_t (*xy)[2]) {
 void gpu_world_face(int n,g3s_phandle *p,grs_bitmap *bm,int lit) {
     if(!gpu_world_active())return;
     if(n<3||n>32){gpu_world_reject("textured polygon count");return;}
-    /* Terrain emits convex triangles/quads. Model lists are not assumed convex;
-     * reject a non-convex projected boundary before fan triangulation. */
+    /* Terrain retains its strict convex guard. Model lists may be concave;
+     * finish their bounded triangulation before allocating any draw command. */
     int32_t xy[32][2],xyz[32][3];
     unsigned char clipped[32];
     for(int i=0;i<n;i++){
@@ -422,9 +422,22 @@ void gpu_world_face(int n,g3s_phandle *p,grs_bitmap *bm,int lit) {
     }
     int canonicalized=gw_polygon_canonicalize_clipped_positions(n,xyz,clipped,view_w,view_h,xy);
     if(canonicalized<0){gpu_world_reject("invalid polygon projection viewport");return;}
-    if(!gw_polygon_is_convex(n,xy)){
+    unsigned char triangles[30][3];
+    int triangle_count=n-2;
+    if(object_id>=0){
+        triangle_count=gw_model_triangulate(n,xy,triangles);
+        if(!triangle_count){
+            log_polygon_topology(n,p,xy);
+            gpu_world_reject("unsupported model polygon topology");return;
+        }
+    }else if(!gw_polygon_is_convex(n,xy)){
         log_polygon_topology(n,p,xy);
         gpu_world_reject("non-convex polygon topology");return;
+    }else{
+        for(int i=0;i<triangle_count;i++){
+            triangles[i][0]=0;triangles[i][1]=(unsigned char)(i+1);
+            triangles[i][2]=(unsigned char)(i+2);
+        }
     }
     /* Build6's measured boundary fixture emitted equal xyz with sx separated
      * by 387 raw units through the two projection formulas. Canonicalize only
@@ -445,8 +458,9 @@ void gpu_world_face(int n,g3s_phandle *p,grs_bitmap *bm,int lit) {
         p=captured;
     }
     int tex=texture_index(bm);if(tex<0)return;
-    Draw *d=new_draw((n-2)*3,tex,(bm->flags&BMF_TRANS)!=0);if(!d)return;
-    for(int i=1,k=d->first;i<n-1;i++){point_vertex(&vertices[k++],p[0],lit);point_vertex(&vertices[k++],p[i],lit);point_vertex(&vertices[k++],p[i+1],lit);}
+    Draw *d=new_draw(triangle_count*3,tex,(bm->flags&BMF_TRANS)!=0);if(!d)return;
+    for(int i=0,k=d->first;i<triangle_count;i++)
+        for(int j=0;j<3;j++)point_vertex(&vertices[k++],p[triangles[i][j]],lit);
     qa_animation_capture(tex,n,xy);
 }
 void gpu_world_polygon(long color,int n,g3s_phandle *p,int gouraud) {
