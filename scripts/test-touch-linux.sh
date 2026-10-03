@@ -6,9 +6,9 @@ out="$root/dist/touch-tests-linux"
 mkdir -p "$out"
 core=("$touch/touch_controls.c" "$touch/touch_settings.c" "$touch/touch_editor.c" "$touch/touch_radial.c")
 common=(-std=c11 -Wall -Wextra -Werror -pedantic -O2 -DTOUCH_HEADLESS "-I$touch")
-for suite in touch_controls touch_alpha11 touch_alpha2 touch_alpha3 touch_alpha4; do
+for suite in touch_controls touch_alpha11 touch_alpha2 touch_alpha3 touch_alpha4 touch_qa touch_ammo; do
     gcc "${common[@]}" "${core[@]}" "$touch/tests/${suite}_test.c" -lm -o "$out/${suite}_test"
-    if [[ "$suite" == touch_alpha3 || "$suite" == touch_alpha4 ]]; then
+    if [[ "$suite" == touch_alpha3 || "$suite" == touch_alpha4 || "$suite" == touch_ammo ]]; then
         "$out/${suite}_test" "$out/${suite}-settings.cfg"
     else
         "$out/${suite}_test"
@@ -38,6 +38,10 @@ gcc -std=gnu11 -O2 -D__ANDROID__ -DDECLSPEC= -DSDL_MAIN_HANDLED -DTOUCH_HEADLESS
     "${includes[@]}" -include precompiled.h "$touch/tests/touch_input_test.c" \
     "${objects[@]}" -lm -o "$out/touch_input_test"
 "$out/touch_input_test"
+gcc -std=gnu11 -O2 -D__ANDROID__ -DDECLSPEC= -DSDL_MAIN_HANDLED -DTOUCH_HEADLESS \
+    "${includes[@]}" -include precompiled.h "$touch/tests/touch_menu_test.c" \
+    "${objects[@]}" -lm -o "$out/touch_menu_test"
+"$out/touch_menu_test"
 gcc -std=c11 -Wall -Wextra -Werror -pedantic -O2 -DDECLSPEC= -DSDL_MAIN_HANDLED \
     "-I$root/.deps/SDL2/include" "-I$touch" "${core[@]}" "$touch/touch_render.c" \
     "$touch/tests/touch_render_test.c" -lm -o "$out/touch_render_test"

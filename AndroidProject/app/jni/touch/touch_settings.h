@@ -11,7 +11,7 @@
 typedef enum {
     TC_FIRE, TC_USE, TC_JUMP, TC_CROUCH, TC_PREV, TC_NEXT, TC_CONSUMABLE,
     TC_EXPLOSIVE, TC_SPRINT, TC_TARGET, TC_PAUSE, TC_MODE, TC_SETTINGS,
-    TC_STICK, TC_COUNT
+    TC_STICK, TC_AMMO, TC_COUNT
 } TouchControlId;
 typedef struct { float x, y, scale; } TouchPlacement;
 typedef struct {

@@ -80,6 +80,22 @@ static void drags(void) {
     reset(true); finger(TOUCH_DOWN,1,600,400,0); finger(TOUCH_UP,1,900,400,200);
     assert(count==4 && events[1].type==TOUCH_POINTER_DOWN && events[3].type==TOUCH_POINTER_UP);
 }
+static void menu_taps(void) {
+    reset(true); touch_configure(&t,1920,1080,true,false,false); count=0;
+    finger(TOUCH_DOWN,1,600,400,100);
+    finger(TOUCH_MOTION,1,603,401,600);
+    finger(TOUCH_UP,1,603,401,100+TOUCH_MENU_TAP_MS);
+    assert(count==2 && events[1].type==TOUCH_POINTER_TAP);
+    near(events[1].x,600); near(events[1].y,400);
+    count=0; finger(TOUCH_DOWN,2,600,400,2000);
+    finger(TOUCH_UP,2,600,400,2000+TOUCH_MENU_TAP_MS+1);
+    assert(count==1); /* a long stationary hold is not a menu activation */
+    count=0; finger(TOUCH_DOWN,3,600,400,4000);
+    finger(TOUCH_MOTION,3,630,400,4300);
+    finger(TOUCH_UP,3,600,400,4500);
+    assert(count==5 && events[1].type==TOUCH_POINTER_DOWN &&
+           events[4].type==TOUCH_POINTER_UP); /* returning to anchor stays a drag */
+}
 static void ownership_and_cancel(void) {
     for(int dragging=0;dragging<2;dragging++) {
         reset(true); finger(TOUCH_DOWN,1,600,400,0);
@@ -107,7 +123,7 @@ static void ownership_and_cancel(void) {
     }
 }
 int main(void) {
-    bars(); transform(); taps(); drags(); ownership_and_cancel();
-    puts("TOUCH_ALPHA11_TESTS=PASS (5 groups: surface, transform, taps, drags, ownership/cancel)");
+    bars(); transform(); taps(); drags(); menu_taps(); ownership_and_cancel();
+    puts("TOUCH_ALPHA11_TESTS=PASS (6 groups: surface, transform, taps, drags, menu taps, ownership/cancel)");
     return 0;
 }

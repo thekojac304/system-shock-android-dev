@@ -7,7 +7,14 @@
 #define TOUCH_RADIAL_MAX_ENTRIES 7
 #define TOUCH_RADIAL_HOLD_MS 320u
 typedef enum { TOUCH_RADIAL_WEAPON, TOUCH_RADIAL_CONSUMABLE,
-               TOUCH_RADIAL_EXPLOSIVE, TOUCH_RADIAL_CATEGORY_COUNT } TouchRadialCategory;
+               TOUCH_RADIAL_EXPLOSIVE, TOUCH_RADIAL_AMMO,
+               TOUCH_RADIAL_CATEGORY_COUNT } TouchRadialCategory;
+/* Bind ammo choices to the equipped slot AND gun definition. A live refresh
+   disables stale sectors if the weapon changes while a finger is held. */
+#define TOUCH_AMMO_CONTEXT(slot, gun) (100 + ((slot) * 32 + (gun)) * 4)
+#define TOUCH_AMMO_RELOAD_ID(slot, gun) TOUCH_AMMO_CONTEXT(slot, gun)
+#define TOUCH_AMMO_TYPE_ID(slot, gun, type) (TOUCH_AMMO_CONTEXT(slot, gun) + 1 + (type))
+#define TOUCH_AMMO_IS_RELOAD(id) (((id) - TOUCH_AMMO_CONTEXT(0, 0)) % 4 == 0)
 typedef struct {
     int id;                    /* original weapon slot or inventory type */
     char label[24];

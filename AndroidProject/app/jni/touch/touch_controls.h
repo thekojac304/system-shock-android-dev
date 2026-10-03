@@ -16,16 +16,17 @@ typedef enum {
 typedef enum {
     TOUCH_JUMP, TOUCH_CROUCH, TOUCH_WEAPON_PREV, TOUCH_WEAPON_NEXT,
     TOUCH_CONSUMABLE, TOUCH_EXPLOSIVE, TOUCH_SPRINT, TOUCH_TARGET_ID,
-    TOUCH_PAUSE, TOUCH_ACTION_COUNT
+    TOUCH_PAUSE, TOUCH_AMMO, TOUCH_ACTION_COUNT
 } TouchAction;
 typedef enum { TOUCH_DOWN, TOUCH_MOTION, TOUCH_UP, TOUCH_ABORT } TouchPhase;
 #define TOUCH_TAP_MS 350u
+#define TOUCH_MENU_TAP_MS 1000u
 typedef enum {
     TOUCH_FIRE_DOWN, TOUCH_FIRE_UP, TOUCH_USE_PRESS,
     TOUCH_POINTER_DOWN, TOUCH_POINTER_MOVE, TOUCH_POINTER_UP,
     TOUCH_MODE_CHANGED, TOUCH_CANCEL, TOUCH_ACTION_DOWN, TOUCH_ACTION_UP,
     TOUCH_POINTER_TAP, TOUCH_UI_CHANGED, TOUCH_SETTINGS_SAVE,
-    TOUCH_RADIAL_SELECT, TOUCH_HAPTIC
+    TOUCH_RADIAL_SELECT, TOUCH_HAPTIC, TOUCH_QA_COMMAND
 } TouchOutput;
 /* Outputs are ordered edges, not polled booleans: even a down/up between
    game polls reaches the original input queue. Cancellation invalidates them. */
@@ -48,14 +49,15 @@ typedef struct {
     bool dragging;
     bool radial_pending, radial_cancelled, radial_opened;
 } TouchFinger;
-typedef enum { TOUCH_UI_CLOSED, TOUCH_UI_SETTINGS, TOUCH_UI_EDITOR } TouchPanel;
+typedef enum { TOUCH_UI_CLOSED, TOUCH_UI_SETTINGS, TOUCH_UI_EDITOR, TOUCH_UI_QA } TouchPanel;
 typedef enum {
     TU_EDIT, TU_OPACITY_DOWN, TU_OPACITY_UP, TU_X_DOWN, TU_X_UP,
     TU_Y_DOWN, TU_Y_UP, TU_INVERT, TU_STICK_DOWN, TU_STICK_UP,
     TU_RESET, TU_CANCEL, TU_SAVE, TU_PREV, TU_NEXT, TU_SCALE_DOWN,
     TU_SCALE_UP, TU_BACK, TU_DOCK, TU_PAGE, TU_HAPTICS,
     TU_HAPTIC_STRENGTH, TU_WHEEL_WEAPON, TU_WHEEL_CONSUMABLE,
-    TU_WHEEL_EXPLOSIVE, TU_COUNT
+    TU_WHEEL_EXPLOSIVE, TU_QA, TU_QA_GOD, TU_QA_HEAL, TU_QA_LOADOUT, TU_QA_CLOSE,
+    TU_QA_DECK_FIRST, TU_QA_DECK_LAST=TU_QA_DECK_FIRST+12, TU_COUNT
 } TouchUiAction;
 typedef int (*TouchRadialPopulate)(void *user, TouchRadialCategory category,
                                     TouchRadialEntry entries[TOUCH_RADIAL_MAX_ENTRIES]);
@@ -68,6 +70,8 @@ typedef struct {
     unsigned fire_count, use_count;
     unsigned action_count[TOUCH_ACTION_COUNT];
     bool sprint_latched;
+    bool qa_enabled, qa_god;
+    const char *qa_status;
     TouchRadialSelector radial;
     TouchRadialPopulate radial_populate;
     float anchor_x, anchor_y, movement_x, movement_y, look_x, look_y;

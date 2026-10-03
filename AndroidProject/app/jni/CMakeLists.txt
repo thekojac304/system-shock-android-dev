@@ -57,3 +57,23 @@ target_sources(main PRIVATE touch/touch_controls.c touch/touch_shock_bridge.c to
 foreach(touch_consumer main GAME_LIB INPUT_LIB)
     target_include_directories(${touch_consumer} PRIVATE "${CMAKE_CURRENT_LIST_DIR}/touch")
 endforeach()
+
+# QA commands are linked only into the separate QA application. Runtime opt-in
+# remains OFF even in that application.
+option(RP5NP_QA_TOOLS "Build touch-accessible QA commands" OFF)
+if(RP5NP_QA_TOOLS)
+    target_sources(GAME_LIB PRIVATE touch/qa_tools.c)
+    foreach(qa_consumer main GAME_LIB)
+        target_compile_definitions(${qa_consumer} PRIVATE RP5NP_QA_TOOLS=1)
+    endforeach()
+endif()
+
+# TEMPORARY AUDLIFE: opt-in diagnostic build, no playback policy changes.
+option(RP5NP_AUDIO_DIAGNOSTICS "Trace Android audio lifecycle and mixer timing" OFF)
+if(RP5NP_AUDIO_DIAGNOSTICS)
+    foreach(audio_consumer main GAME_LIB)
+        target_compile_definitions(${audio_consumer} PRIVATE RP5NP_AUDIO_DIAGNOSTICS=1)
+        target_include_directories(${audio_consumer} PRIVATE "${CMAKE_CURRENT_LIST_DIR}/audio_diag")
+    endforeach()
+    include(audio_diag/instrument.cmake)
+endif()

@@ -11,6 +11,7 @@ static TouchCircle control_circle(const TouchControls *t, int id) {
     if (id==TC_USE) return t->layout.use;
     if (id==TC_SETTINGS) return t->layout.settings;
     if (id==TC_STICK) return t->layout.stick;
+    if (id==TC_AMMO) return t->layout.action[TOUCH_AMMO];
     if (id>=TC_JUMP && id<=TC_PAUSE) return t->layout.action[id-TC_JUMP];
     return (TouchCircle){0};
 }
@@ -46,6 +47,7 @@ void touch_layout_refresh(TouchControls *t) {
         else if (id==TC_USE) t->layout.use=c;
         else if (id==TC_SETTINGS) t->layout.settings=c;
         else if (id==TC_STICK) { t->layout.stick=c; t->layout.move_radius=c.radius; }
+        else if (id==TC_AMMO) t->layout.action[TOUCH_AMMO]=c;
         else t->layout.action[id-TC_JUMP]=c;
     }
     t->layout.move_split=w*.45f;
@@ -75,6 +77,24 @@ void touch_ui_open(TouchControls *t) {
 }
 void touch_ui_action(TouchControls *t, TouchUiAction action) {
     if (t->panel==TOUCH_UI_CLOSED) return;
+    if (action>=TU_QA) {
+        if (!t->qa_enabled || !t->gameplay_available) return;
+        if (action==TU_QA && t->panel==TOUCH_UI_SETTINGS) {
+            t->panel=TOUCH_UI_QA;
+            t->ui_owned=false;
+            t->qa_status="SELECT A TOOL OR DESTINATION";
+            ui_emit(t,TOUCH_UI_CHANGED);
+        } else if (t->panel==TOUCH_UI_QA) {
+            if (action==TU_QA_CLOSE) {
+                touch_cancel(t);
+                ui_emit(t,TOUCH_UI_CHANGED);
+            } else if (action==TU_QA_GOD || action==TU_QA_HEAL || action==TU_QA_LOADOUT ||
+                       (action>=TU_QA_DECK_FIRST && action<=TU_QA_DECK_LAST)) {
+                if (t->emit) t->emit(t->user,TOUCH_QA_COMMAND,(float)action,0);
+            }
+        }
+        return;
+    }
     t->save_failed=false;
     switch (action) {
     case TU_EDIT: t->panel=TOUCH_UI_EDITOR; break;
@@ -110,7 +130,7 @@ void touch_ui_action(TouchControls *t, TouchUiAction action) {
         touch_cancel(t);
         ui_emit(t,TOUCH_UI_CHANGED);
         break;
-    case TU_COUNT: break;
+    default: break;
     }
     touch_settings_validate(&t->settings);
     touch_layout_refresh(t);
@@ -134,7 +154,10 @@ TouchRect touch_ui_bounds(const TouchControls *t, TouchUiAction action) {
             default: break;
             }
         } else switch (action) {
-        case TU_EDIT: r=(TouchRect){.22f,.16f,.56f,.075f}; break;
+        case TU_EDIT: r=(TouchRect){.22f,.16f,t->qa_enabled && t->gameplay_available ? .34f : .56f,.075f}; break;
+        case TU_QA:
+            if (t->qa_enabled && t->gameplay_available) r=(TouchRect){.58f,.16f,.20f,.075f};
+            break;
         case TU_PAGE: r=(TouchRect){.67f,.055f,.12f,.065f}; break;
         case TU_OPACITY_DOWN: case TU_OPACITY_UP: y=.27f; break;
         case TU_X_DOWN: case TU_X_UP: y=.37f; break;
@@ -149,6 +172,15 @@ TouchRect touch_ui_bounds(const TouchControls *t, TouchUiAction action) {
         if (y) {
             bool plus=action==TU_OPACITY_UP || action==TU_X_UP || action==TU_Y_UP || action==TU_STICK_UP;
             r=(TouchRect){plus ? .68f : .22f,y,.10f,.075f};
+        }
+    } else if (t->panel==TOUCH_UI_QA && t->qa_enabled) {
+        if (action==TU_QA_GOD) r=(TouchRect){.12f,.16f,.24f,.09f};
+        else if (action==TU_QA_HEAL) r=(TouchRect){.38f,.16f,.24f,.09f};
+        else if (action==TU_QA_LOADOUT) r=(TouchRect){.64f,.16f,.24f,.09f};
+        else if (action==TU_QA_CLOSE) r=(TouchRect){.32f,.87f,.36f,.09f};
+        else if (action>=TU_QA_DECK_FIRST && action<=TU_QA_DECK_LAST) {
+            int i=action-TU_QA_DECK_FIRST;
+            r=(TouchRect){.12f+(i%3)*.26f,.30f+(i/3)*.105f,.24f,.09f};
         }
     } else if (t->panel==TOUCH_UI_EDITOR) {
         /* The default center strip leaves all Alpha 2.2 controls visible.

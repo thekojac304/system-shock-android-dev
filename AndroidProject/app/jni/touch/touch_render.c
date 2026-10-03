@@ -96,7 +96,8 @@ static void radial(const TouchControls *t,SDL_Renderer *r) {
             color(r,255,213,110,255,fmaxf(.7f,t->settings.opacity));
             text(r,"ACTIVE",x,y-R*.13f,t->layout.height/410,R*.5f);
         }
-        if (wheel->category!=TOUCH_RADIAL_WEAPON) {
+        if (wheel->category!=TOUCH_RADIAL_WEAPON &&
+            !(wheel->category==TOUCH_RADIAL_AMMO && TOUCH_AMMO_IS_RELOAD(entry->id))) {
             char count[16];
             snprintf(count,sizeof(count),"X%u",entry->count);
             color(r,217,232,232,245,fmaxf(.7f,t->settings.opacity));
@@ -117,6 +118,12 @@ static bool held(const TouchControls *t,int id) {
     if (id==TC_FIRE) return t->fire_count>0;
     if (id==TC_USE) return t->use_count>0;
     if (id==TC_STICK) return t->move_owner>=0;
+    if (id==TC_AMMO) {
+        for (int i=0;i<TOUCH_MAX_FINGERS;++i)
+            if (t->fingers[i].active && t->fingers[i].action==TOUCH_AMMO &&
+                (t->fingers[i].radial_pending || t->fingers[i].radial_opened)) return true;
+        return false;
+    }
     if (id==TC_SPRINT) return t->sprint_latched;
     return id>=TC_JUMP && id<=TC_PAUSE && t->action_count[id-TC_JUMP]>0;
 }
@@ -127,7 +134,8 @@ static void controls(const TouchControls *t,SDL_Renderer *r) {
         if (!preview) {
             if (id==TC_PAUSE && !t->pause_available) continue;
             if (id!=TC_PAUSE && id!=TC_SETTINGS && !t->gameplay_available) continue;
-            if (id!=TC_PAUSE && id!=TC_SETTINGS && id!=TC_MODE && t->effective_mode!=TOUCH_GAMEPLAY) continue;
+            if (id!=TC_PAUSE && id!=TC_SETTINGS && id!=TC_MODE && id!=TC_AMMO &&
+                t->effective_mode!=TOUCH_GAMEPLAY) continue;
         }
         TouchRect b=touch_control_bounds(t,id);
         bool selected=t->panel==TOUCH_UI_EDITOR && t->selected==id;
@@ -162,6 +170,15 @@ static void controls(const TouchControls *t,SDL_Renderer *r) {
     }
 }
 static const char *ui_label(const TouchControls *t,int action) {
+    static const char *decks[]={"MEDICAL","RESEARCH","REACTOR","MAINTENANCE",
+        "STORAGE","FLIGHT DECK","EXECUTIVE","ALPHA GROVE","BETA GROVE",
+        "DELTA GROVE","ENGINEERING","SECURITY","BRIDGE"};
+    if (action==TU_QA) return "QA TOOLS";
+    if (action==TU_QA_GOD) return t->qa_god ? "GOD MODE ON" : "GOD MODE OFF";
+    if (action==TU_QA_HEAL) return "FULL HEALTH / ENERGY";
+    if (action==TU_QA_LOADOUT) return "FULL QA LOADOUT";
+    if (action==TU_QA_CLOSE) return "CLOSE";
+    if (action>=TU_QA_DECK_FIRST && action<=TU_QA_DECK_LAST) return decks[action-TU_QA_DECK_FIRST];
     static const char *names[TU_COUNT]={"EDIT LAYOUT","-","+","-","+","-","+",
         "INVERT Y OFF","-","+","RESET TOUCH SETTINGS","CANCEL","SAVE / DONE",
         "<",">","SIZE -","SIZE +","SETTINGS","MOVE TOOLBAR","MORE >",
@@ -187,7 +204,13 @@ static const char *ui_label(const TouchControls *t,int action) {
 static void panel(const TouchControls *t,SDL_Renderer *r) {
     float w=t->layout.width,h=t->layout.height;
     char value[100];
-    if (t->panel==TOUCH_UI_SETTINGS) {
+    if (t->panel==TOUCH_UI_QA) {
+        color(r,4,10,17,245,1); rect(r,(TouchRect){0,0,w,h},true);
+        color(r,208,241,244,255,1);
+        text(r,"QA TOOLS",w*.5f,h*.07f,h/185,w*.5f);
+        text(r,t->qa_status ? t->qa_status : "",w*.5f,h*.12f,h/300,w*.80f);
+        text(r,"TELEPORT",w*.5f,h*.275f,h/300,w*.5f);
+    } else if (t->panel==TOUCH_UI_SETTINGS) {
         color(r,4,10,17,160,1); rect(r,(TouchRect){0,0,w,h},true);
         color(r,15,28,40,250,1); rect(r,(TouchRect){w*.18f,h*.035f,w*.64f,h*.94f},true);
         color(r,208,241,244,255,1);

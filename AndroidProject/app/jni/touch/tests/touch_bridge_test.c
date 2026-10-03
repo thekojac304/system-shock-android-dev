@@ -32,6 +32,7 @@ static bool sprint_active;
 static TouchCursorTarget cursor_target;
 static Uint32 test_ticks;
 static int snapshot_count,selection_calls,selection_id,selection_category;
+static int direct_taps,drag_edges;
 Uint32 SDL_GetTicks(void) { return test_ticks; }
 int touch_game_radial_snapshot(TouchRadialCategory category,
                                TouchRadialEntry entries[TOUCH_RADIAL_MAX_ENTRIES]) {
@@ -94,6 +95,15 @@ void touch_input_button(bool left,bool down) {
     events[event_count]=down ? bit : -bit;
     aim_x[event_count]=px; aim_y[event_count++]=py;
 }
+void touch_input_tap(float x,float y) {
+    direct_taps++;
+    touch_input_pointer(x,y);
+    touch_input_button(true,true); touch_input_button(true,false);
+}
+void touch_input_drag_button(bool down) {
+    drag_edges++;
+    touch_input_button(true,down);
+}
 void touch_input_cancel(void) {releases++; buttons=0; event_count=0;}
 void touch_draw(const TouchControls *t,SDL_Renderer *r) {(void)t; (void)r;}
 static void finger(Uint32 type,int id,float x,float y) {
@@ -120,6 +130,7 @@ static void reset(void) {
     test_ticks=0; snapshot_count=selection_calls=0;
     touch_bridge_init(); touch_bridge_controller(false); touch_bridge_sync();
     event_count=0; cursor_target=TOUCH_TARGET_UI_CONTROL; switch_target_on_press=false;
+    direct_taps=drag_edges=0;
 }
 static void radial_dispatch(void) {
     reset(); snapshot_count=1; touch.settings.wheel_enabled[0]=true;
@@ -234,13 +245,14 @@ static void full_surface_and_transition(void) {
 static void alpha2_actions(void) {
     static const float xy[TOUCH_ACTION_COUNT][2] = {
         {.95f,.52f},{.79f,.54f},{.55f,.78f},{.55f,.90f},
-        {.52f,.10f},{.63f,.10f},{.22f,.54f},{.73f,.10f},{.05f,.06f}
+        {.52f,.10f},{.63f,.10f},{.22f,.54f},{.73f,.10f},{.05f,.06f},{.43f,.10f}
     };
     reset(); memset(action_down,0,sizeof(action_down));
     memset(action_up,0,sizeof(action_up));
     for(int a=0;a<TOUCH_ACTION_COUNT;a++) {
         if(a==TOUCH_SPRINT) continue;
         finger(SDL_FINGERDOWN,20+a,xy[a][0],xy[a][1]);
+        assert(action_down[a]==(a==TOUCH_AMMO ? 0 : 1) && action_up[a]==0);
         finger(SDL_FINGERUP,20+a,xy[a][0],xy[a][1]);
         assert(action_down[a]==1 && action_up[a]==1);
     }
@@ -279,6 +291,30 @@ static void alpha2_actions(void) {
     previous=action_down[TOUCH_PAUSE];
     finger(SDL_FINGERDOWN,4,.05f,.06f);
     assert(action_down[TOUCH_PAUSE]==previous);
+    /* AMMO defers the short action, and a wheel hold never reloads on open
+       or center cancel. It also dispatches a selected sector in cursor mode. */
+    for (int cursor=0;cursor<2;++cursor) {
+        reset(); snapshot_count=1;
+        if (cursor) {
+            finger(SDL_FINGERDOWN,1,.85f,.08f);
+            finger(SDL_FINGERUP,1,.85f,.08f);
+        }
+        int ammo_before=action_down[TOUCH_AMMO];
+        test_ticks=100; finger(SDL_FINGERDOWN,50,.43f,.10f);
+        test_ticks=419; touch_bridge_sync(); assert(!touch.radial.open);
+        test_ticks=420; touch_bridge_sync(); assert(touch.radial.open);
+        assert(action_down[TOUCH_AMMO]==ammo_before);
+        test_ticks=430; finger(SDL_FINGERUP,50,
+            touch.radial.cx/touch.layout.width,touch.radial.cy/touch.layout.height);
+        assert(!selection_calls && !touch.radial.open && action_down[TOUCH_AMMO]==ammo_before);
+        test_ticks=500; finger(SDL_FINGERDOWN,51,.43f,.10f);
+        test_ticks=820; touch_bridge_sync(); assert(touch.radial.open);
+        float x=touch.radial.cx/touch.layout.width;
+        float y=(touch.radial.cy-touch.radial.outer_radius*.7f)/touch.layout.height;
+        test_ticks=830; finger(SDL_FINGERUP,51,x,y);
+        assert(selection_calls==1 && selection_category==TOUCH_RADIAL_AMMO && selection_id==4);
+        assert(action_down[TOUCH_AMMO]==ammo_before && !touch.radial.open);
+    }
 }
 static void cursor_regions(void) {
     reset();
@@ -286,16 +322,19 @@ static void cursor_regions(void) {
     cursor_target=TOUCH_TARGET_UI_CONTROL;
     finger(SDL_FINGERDOWN,2,.5f,.5f); finger(SDL_FINGERUP,2,.5f,.5f);
     assert(event_count==2 && events[0]==1 && events[1]==-1);
+    assert(direct_taps==1);
     cursor_target=TOUCH_TARGET_WORLD; event_count=0;
     finger(SDL_FINGERDOWN,3,.5f,.5f); finger(SDL_FINGERUP,3,.5f,.5f);
     assert(event_count==4 && events[0]==1 && events[1]==-1 &&
            events[2]==1 && events[3]==-1);
+    assert(direct_taps==1);
     for(int i=0;i<4;i++) assert(aim_x[i]==512 && aim_y[i]==384);
     event_count=0;
     finger(SDL_FINGERDOWN,4,.5f,.5f);
     finger(SDL_FINGERMOTION,4,.6f,.5f);
     finger(SDL_FINGERUP,4,.6f,.5f);
     assert(event_count==2 && events[0]==1 && events[1]==-1);
+    assert(drag_edges==2 && direct_taps==1);
     event_count=0;
     for(int i=0;i<3;i++) {
         finger(SDL_FINGERDOWN,10+i,.5f,.5f);

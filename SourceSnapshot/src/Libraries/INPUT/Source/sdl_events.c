@@ -75,6 +75,8 @@ static int nextMouseEvent = 0;
 static TouchMouseButtons sourceButtons;
 static bool addingTouchEvent;
 static uchar touchNeedsRelease;
+static uchar touchDirectNeedsRelease;
+static uchar touchEventModifiers;
 static uchar deliveredMouseButtons;
 static bool mouseEventIsTouch[kNumMouseEvents];
 static uchar mouseEventOtherButtons[kNumMouseEvents];
@@ -420,13 +422,17 @@ void SetMouseXY(int mx, int my);
 static void source_mouse_button(TouchMouseSource source, bool left, bool down) {
     const uchar bit = (uchar)(1u << (left ? MOUSE_LBUTTON : MOUSE_RBUTTON));
     if (!touch_mouse_button(&sourceButtons, source, bit, down)) return;
-    if (source == TOUCH_MOUSE_TOUCH && down) touchNeedsRelease |= bit;
+    if (source == TOUCH_MOUSE_TOUCH && down) {
+        touchNeedsRelease |= bit;
+        if (touchEventModifiers) touchDirectNeedsRelease |= bit;
+    }
     ss_mouse_event ev = {0};
     ev.type = left ? (down ? MOUSE_LDOWN : MOUSE_LUP) : (down ? MOUSE_RDOWN : MOUSE_RUP);
     ev.x = (short)MouseX; ev.y = (short)MouseY;
     ev.buttons = touch_mouse_buttons(&sourceButtons);
     ev.timestamp = mouse_get_time();
     ev.modifiers = rp5np_effective_shift() ? 1 : 0;
+    if (source == TOUCH_MOUSE_TOUCH) ev.modifiers |= touchEventModifiers;
     addingTouchEvent = source == TOUCH_MOUSE_TOUCH;
     addMouseEvent(&ev);
     addingTouchEvent = false;
@@ -434,6 +440,20 @@ static void source_mouse_button(TouchMouseSource source, bool left, bool down) {
 
 void touch_input_button(bool left, bool down) {
     source_mouse_button(TOUCH_MOUSE_TOUCH, left, down);
+}
+
+void touch_input_tap(float x, float y) {
+    touch_input_pointer(x, y);
+    touchEventModifiers = MOUSE_MOD_TOUCH_TAP;
+    touch_input_button(true, true);
+    touch_input_button(true, false);
+    touchEventModifiers = 0;
+}
+
+void touch_input_drag_button(bool down) {
+    touchEventModifiers = MOUSE_MOD_TOUCH_DRAG;
+    touch_input_button(true, down);
+    touchEventModifiers = 0;
 }
 
 void touch_input_pointer(float x, float y) {
@@ -471,7 +491,9 @@ void touch_input_cancel(void) {
     /* A finger may already be up while its queued release has not reached
        the game. Keep cleanup responsibility until that release is consumed. */
     uchar held = sourceButtons.source[TOUCH_MOUSE_TOUCH] | touchNeedsRelease;
+    uchar direct = touchDirectNeedsRelease;
     touchNeedsRelease = 0;
+    touchDirectNeedsRelease = 0;
     sourceButtons.source[TOUCH_MOUSE_TOUCH] = 0;
     uchar remaining = touch_mouse_buttons(&sourceButtons);
     uchar projected = count ? mouseEvents[count - 1].buttons : deliveredMouseButtons;
@@ -486,6 +508,7 @@ void touch_input_cancel(void) {
                                               : (down ? MOUSE_RDOWN : MOUSE_RUP);
             ev.x = (short)MouseX; ev.y = (short)MouseY;
             ev.buttons = remaining; ev.timestamp = mouse_get_time();
+            if (!down && (direct & bit)) ev.modifiers = MOUSE_MOD_TOUCH_TAP;
             addMouseEvent(&ev);
         }
     }
@@ -555,6 +578,7 @@ void touch_input_action(TouchAction action, bool down) {
     case TOUCH_CONSUMABLE: if (down) rp5np_dispatch_action(RP5NP_CONTROLLER_ACTION_QUICK_CONSUMABLE); break;
     case TOUCH_EXPLOSIVE: if (down) rp5np_dispatch_action(RP5NP_CONTROLLER_ACTION_QUICK_EXPLOSIVE); break;
     case TOUCH_TARGET_ID: if (down) rp5np_dispatch_action(RP5NP_CONTROLLER_ACTION_TARGET_ID); break;
+    case TOUCH_AMMO: if (down) rp5np_dispatch_action(RP5NP_CONTROLLER_ACTION_TOUCH_AMMO); break;
     default: break;
     }
 }
@@ -1746,9 +1770,19 @@ errtype mouse_next(ss_mouse_event *res) {
     if (mouseEventIsTouch[0]) {
         if (res->type & MOUSE_LDOWN) touchNeedsRelease |= 1u << MOUSE_LBUTTON;
         if (res->type & MOUSE_RDOWN) touchNeedsRelease |= 1u << MOUSE_RBUTTON;
+        if (res->modifiers & (MOUSE_MOD_TOUCH_TAP | MOUSE_MOD_TOUCH_DRAG)) {
+            if (res->type & MOUSE_LDOWN) touchDirectNeedsRelease |= 1u << MOUSE_LBUTTON;
+            if (res->type & MOUSE_RDOWN) touchDirectNeedsRelease |= 1u << MOUSE_RBUTTON;
+        }
     }
-    if (res->type & MOUSE_LUP) touchNeedsRelease &= (uchar)~(1u << MOUSE_LBUTTON);
-    if (res->type & MOUSE_RUP) touchNeedsRelease &= (uchar)~(1u << MOUSE_RBUTTON);
+    if (res->type & MOUSE_LUP) {
+        touchNeedsRelease &= (uchar)~(1u << MOUSE_LBUTTON);
+        touchDirectNeedsRelease &= (uchar)~(1u << MOUSE_LBUTTON);
+    }
+    if (res->type & MOUSE_RUP) {
+        touchNeedsRelease &= (uchar)~(1u << MOUSE_RBUTTON);
+        touchDirectNeedsRelease &= (uchar)~(1u << MOUSE_RBUTTON);
+    }
 #endif
 
     --nextMouseEvent;

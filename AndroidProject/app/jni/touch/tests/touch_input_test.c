@@ -20,7 +20,8 @@ Uint32 SDL_GetWindowFlags(SDL_Window *w) {(void)w; return SDL_WINDOW_INPUT_FOCUS
 int SDL_ShowCursor(int toggle) {(void)toggle; return SDL_DISABLE;}
 
 static void reset(void) {
-    nextMouseEvent=0; touchNeedsRelease=deliveredMouseButtons=0;
+    nextMouseEvent=0; touchNeedsRelease=touchDirectNeedsRelease=deliveredMouseButtons=0;
+    touchEventModifiers=0;
     memset(&sourceButtons,0,sizeof(sourceButtons));
     memset(&latestMouseEvent,0,sizeof(latestMouseEvent));
     MouseX=512; MouseY=384;
@@ -103,6 +104,32 @@ static void cursor_edges(void) {
     touch_input_button(true,false); touch_input_cancel();
     e=next(); assert(e.type==MOUSE_LUP && !e.buttons); empty();
 }
+static void control_taps_and_drags(void) {
+    reset(); touch_input_tap(123,234);
+    ss_mouse_event e=next(); assert(e.type==MOUSE_MOTION && e.x==123 && e.y==234);
+    e=next(); assert(e.type==MOUSE_LDOWN && e.buttons==1 && e.modifiers==MOUSE_MOD_TOUCH_TAP);
+    e=next(); assert(e.type==MOUSE_LUP && !e.buttons && e.modifiers==MOUSE_MOD_TOUCH_TAP);
+    empty(); assert(!touchDirectNeedsRelease);
+    reset(); touch_input_tap(123,234); next(); next();
+    touch_input_cancel(); touch_input_cancel();
+    e=next(); assert(e.type==MOUSE_LUP && !e.buttons && e.modifiers==MOUSE_MOD_TOUCH_TAP);
+    empty();
+    reset(); touch_input_tap(123,234); touch_input_tap(123,234);
+    next(); next(); next(); next(); next(); /* Second press dispatched. */
+    touch_input_cancel();
+    e=next(); assert(e.type==MOUSE_LUP && e.modifiers==MOUSE_MOD_TOUCH_TAP); empty();
+    reset(); touch_input_drag_button(true); touch_input_pointer(456,567);
+    touch_input_drag_button(false);
+    e=next(); assert(e.type==MOUSE_LDOWN && e.modifiers==MOUSE_MOD_TOUCH_DRAG);
+    e=next(); assert(e.type==MOUSE_MOTION && e.buttons==1 && !e.modifiers);
+    e=next(); assert(e.type==MOUSE_LUP && e.modifiers==MOUSE_MOD_TOUCH_DRAG);
+    empty();
+    /* A completed touch tap cannot release an overlapping native hold. */
+    reset(); source_mouse_button(TOUCH_MOUSE_PHYSICAL,true,true); next();
+    touch_input_tap(123,234); assert(next().type==MOUSE_MOTION); empty();
+    assert(latestMouseEvent.buttons==1);
+    source_mouse_button(TOUCH_MOUSE_PHYSICAL,true,false); assert(next().type==MOUSE_LUP); empty();
+}
 static void sprint_sources(void) {
     mod_state=KMOD_NONE;
     rp5np_set_shift(false);
@@ -126,5 +153,6 @@ static void sprint_sources(void) {
 int main(void) {
     taps(); release_pending_at_cancel(); physical_survives();
     cancel_preserves_native_queue(); queue_overflow(); cursor_edges(); sprint_sources();
-    puts("TOUCH_INPUT_TESTS=PASS (6 groups, real SDL adapter including cursor edges)"); return 0;
+    control_taps_and_drags();
+    puts("TOUCH_INPUT_TESTS=PASS (8 groups, real SDL adapter including completed menu taps)"); return 0;
 }

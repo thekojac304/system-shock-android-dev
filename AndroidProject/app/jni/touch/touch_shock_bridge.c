@@ -8,6 +8,10 @@
 #include "input.h"
 #include <stddef.h>
 #include <stdio.h>
+#ifdef RP5NP_QA_TOOLS
+#include "qa_tools.h"
+static int qa_pending=-1;
+#endif
 #if defined(__ANDROID__) && !defined(TOUCH_HEADLESS)
 #include <jni.h>
 #include <SDL_system.h>
@@ -152,7 +156,16 @@ static void pointer(float x, float y) {
 static void output(void *user, TouchOutput event, float x, float y) {
     (void)user;
     switch (event) {
+    case TOUCH_QA_COMMAND:
+#ifdef RP5NP_QA_TOOLS
+        if (touch.qa_enabled && touch.panel==TOUCH_UI_QA && qa_pending<0)
+            qa_pending=(int)x;
+#endif
+        break;
     case TOUCH_CANCEL:
+#ifdef RP5NP_QA_TOOLS
+        qa_pending=-1;
+#endif
         clear_movement();
         touch_input_cancel();
         touch_input_cancel_actions();
@@ -175,7 +188,8 @@ static void output(void *user, TouchOutput event, float x, float y) {
         break;
     case TOUCH_RADIAL_SELECT:
         if (touch.enabled && touch.gameplay_available && !touch.controller &&
-            touch.panel==TOUCH_UI_CLOSED && touch.effective_mode==TOUCH_GAMEPLAY)
+            touch.panel==TOUCH_UI_CLOSED &&
+            (touch.effective_mode==TOUCH_GAMEPLAY || (int)x==TOUCH_RADIAL_AMMO))
             touch_game_radial_select((TouchRadialCategory)(int)x,(int)y);
         break;
     case TOUCH_HAPTIC:
@@ -208,7 +222,7 @@ static void output(void *user, TouchOutput event, float x, float y) {
     case TOUCH_POINTER_DOWN:
         request_mode(false);
         pointer(x, y);
-        touch_input_button(true, true);
+        touch_input_drag_button(true);
         break;
     case TOUCH_POINTER_MOVE:
         request_mode(false);
@@ -216,7 +230,7 @@ static void output(void *user, TouchOutput event, float x, float y) {
         break;
     case TOUCH_POINTER_UP:
         pointer(x, y);
-        touch_input_button(true, false);
+        touch_input_drag_button(false);
         break;
     case TOUCH_POINTER_TAP: {
         float gx, gy;
@@ -226,6 +240,10 @@ static void output(void *user, TouchOutput event, float x, float y) {
         touch_input_pointer(gx, gy);
         /* Capture the target before the first press changes a panel or loop. */
         TouchCursorTarget target = touch_cursor_target_at((int)gx, (int)gy);
+        if (target==TOUCH_TARGET_UI_CONTROL || target==TOUCH_TARGET_NONE) {
+            touch_input_tap(gx,gy);
+            break;
+        }
         touch_input_button(true, true);
         touch_input_button(true, false);
         if (target == TOUCH_TARGET_WORLD || target == TOUCH_TARGET_UI_OBJECT) {
@@ -268,6 +286,24 @@ void touch_bridge_cancel(void) {
 }
 
 void touch_bridge_after_input(void) {
+#ifdef RP5NP_QA_TOOLS
+    /* Run only after uiPoll has unwound. Level loads must not re-enter the
+       SDL event dispatcher or execute while the renderer is drawing. */
+    if (qa_pending>=0) {
+        int command=qa_pending;
+        qa_pending=-1;
+        if (qa_tools_enabled() && gameplay_available() && touch.panel==TOUCH_UI_QA) {
+            if (command==TU_QA_GOD) qa_tools_toggle_god();
+            else if (command==TU_QA_HEAL) qa_tools_heal();
+            else if (command==TU_QA_LOADOUT) qa_tools_full_loadout();
+            else if (command>=TU_QA_DECK_FIRST && command<=TU_QA_DECK_LAST) {
+                int deck=command-TU_QA_DECK_FIRST;
+                touch_bridge_cancel();
+                qa_tools_teleport(deck);
+            }
+        }
+    }
+#endif
     if (touch_use_pending) {
         pending_auto_return = touch.enabled && touch.gameplay_available &&
             !controller_connected && input_cursor_mode == INPUT_OBJECT_CURSOR &&
@@ -302,6 +338,13 @@ void touch_bridge_sync(void) {
         output_width = ow; output_height = oh; window_width = ww; window_height = wh;
     }
     bool available = gameplay_available();
+#ifdef RP5NP_QA_TOOLS
+    bool qa_enabled=qa_tools_enabled();
+    if (!qa_enabled && touch.panel==TOUCH_UI_QA) touch_bridge_cancel();
+    touch.qa_enabled=qa_enabled;
+    touch.qa_god=qa_tools_god();
+    if (touch.panel==TOUCH_UI_QA) touch.qa_status=qa_tools_status();
+#endif
     Uint32 flags = SDL_GetWindowFlags(window);
     bool enabled = !background && !unfocused && (flags & SDL_WINDOW_INPUT_FOCUS) &&
                    !(flags & (SDL_WINDOW_HIDDEN | SDL_WINDOW_MINIMIZED));

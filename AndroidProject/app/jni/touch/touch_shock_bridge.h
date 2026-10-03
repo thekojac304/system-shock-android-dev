@@ -20,6 +20,9 @@ void touch_bridge_draw(void);
    context/aim/mode decisions. No gameplay actions are called from INPUT_LIB. */
 void touch_input_pointer(float x, float y);
 void touch_input_button(bool left, bool down);
+/* A completed control tap bypasses native mouse double-click buffering. */
+void touch_input_tap(float x, float y);
+void touch_input_drag_button(bool down);
 void touch_input_cancel(void);
 void touch_input_action(TouchAction action, bool down);
 void touch_input_cancel_actions(void);

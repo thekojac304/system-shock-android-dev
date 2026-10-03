@@ -18,6 +18,35 @@ import org.libsdl.app.SDLActivity;
 public class ShockolateActivity extends SDLActivity {
     private static final String TAG = "RP5NP";
 
+    // TEMPORARY AUDLIFE: System.nanoTime and native CLOCK_MONOTONIC share a clock.
+    private void traceAudioLifecycle(String event) {
+        if (!BuildConfig.AUDIO_DIAGNOSTICS) return;
+        KeyguardManager km = (KeyguardManager)getSystemService(Context.KEYGUARD_SERVICE);
+        android.os.PowerManager pm = (android.os.PowerManager)getSystemService(Context.POWER_SERVICE);
+        Log.i("AUDLIFE", "t_us=" + System.nanoTime() / 1000 + " java=" + event
+                + " focus=" + hasWindowFocus() + " locked=" + (km != null && km.isKeyguardLocked())
+                + " interactive=" + (pm != null && pm.isInteractive())
+                + " native=" + mCurrentNativeState + " next=" + mNextNativeState);
+    }
+
+    @Override protected void onPause() {
+        traceAudioLifecycle("onPause.before");
+        super.onPause();
+        traceAudioLifecycle("onPause.after");
+    }
+
+    @Override protected void onStop() {
+        traceAudioLifecycle("onStop.before");
+        super.onStop();
+        traceAudioLifecycle("onStop.after");
+    }
+
+    @Override protected void onStart() {
+        traceAudioLifecycle("onStart.before");
+        super.onStart();
+        traceAudioLifecycle("onStart.after");
+    }
+
     /** Called only for accepted touch-control edges from the native bridge. */
     public void touchHaptic(int strength, int level) {
         if (!hasWindowFocus() || isFinishing()) return;
@@ -98,7 +127,9 @@ public class ShockolateActivity extends SDLActivity {
     }
 
     @Override protected void onResume() {
+        traceAudioLifecycle("onResume.before");
         super.onResume();
+        traceAudioLifecycle("onResume.after");
         lockOrientation("onResume");
         applyWindowPolicy();
         applyKeyguardPolicy();
@@ -106,7 +137,9 @@ public class ShockolateActivity extends SDLActivity {
     }
 
     @Override public void onWindowFocusChanged(boolean hasFocus) {
+        traceAudioLifecycle("focus.before=" + hasFocus);
         super.onWindowFocusChanged(hasFocus);
+        traceAudioLifecycle("focus.after=" + hasFocus);
         Log.i(TAG, "JAVA_WINDOW_FOCUS=" + hasFocus);
         if (hasFocus) applyWindowPolicy();
     }

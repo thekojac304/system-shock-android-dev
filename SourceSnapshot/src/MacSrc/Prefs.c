@@ -30,6 +30,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 //--------------------
 #include "Shock.h"
 #include "Prefs.h"
+#include "ExternalMusic.h"
 
 #include "popups.h"
 #include "olhext.h"
@@ -73,6 +74,8 @@ static const char *PREF_LANGUAGE = "language";
 static const char *PREF_CAPTUREMOUSE = "capture-mouse";
 static const char *PREF_INVERTMOUSEY = "invert-mousey";
 static const char *PREF_MUSIC_VOL = "music-volume";
+static const char *PREF_REPLACEMENT_MEDICAL = "replacement_medical_music";
+static const char *PREF_SOUNDTRACK = "soundtrack";
 static const char *PREF_SFX_VOL = "sfx-volume";
 static const char *PREF_ALOG_VOL = "alog-volume";
 static const char *PREF_VIDEOMODE = "video-mode";
@@ -98,6 +101,10 @@ void SetDefaultPrefs(void) {
     gShockPrefs.prefPlayIntro = 1; // First time through, play the intro
     gShockPrefs.goPopupLabels = true;
     gShockPrefs.soBackMusic = true;
+    gShockPrefs.soSoundtrack = SOUNDTRACK_ORIGINAL;
+#ifdef RP5NP_QA_TOOLS
+    gShockPrefs.qaCheats = false;
+#endif
 #ifdef USE_FLUIDSYNTH
     gShockPrefs.soMidiBackend = 2; // default to fluidsynth when available
 #else
@@ -145,11 +152,11 @@ static char *GetPrefsPathFilename(void) {
 }
 
 static char *trim(char *s) {
-    while (*s && isspace(*s))
+    while (*s && isspace((unsigned char)*s))
         s++;
-    char *c = &s[strlen(s) - 1];
-    while (c >= s && isspace(*c))
-        *(c--) = '\0';
+    char *c = s + strlen(s);
+    while (c > s && isspace((unsigned char)c[-1]))
+        *--c = '\0';
     return s;
 }
 
@@ -167,6 +174,10 @@ int16_t LoadPrefs(void) {
         return SavePrefs();
     }
 
+    /* Explicit soundtrack (even invalid) overrides the legacy boolean,
+     * regardless of line order. Saving migrates the old setting. */
+    int soundtrack_seen = 0, legacy_remake = 0;
+    gShockPrefs.soSoundtrack = SOUNDTRACK_ORIGINAL;
     char line[64];
     while (fgets(line, sizeof(line), f)) {
         char *eq = strchr(line, '=');
@@ -177,6 +188,11 @@ int16_t LoadPrefs(void) {
         const char *key = trim(line);
         const char *value = trim(eq + 1);
 
+#ifdef RP5NP_QA_TOOLS
+        if (strcasecmp(key, "qa_cheats") == 0) {
+            gShockPrefs.qaCheats = is_true(value);
+        } else
+#endif
         if (strcasecmp(key, PREF_LANGUAGE) == 0) {
             int lang = atoi(value);
             if (lang >= 0 && lang <= 2)
@@ -185,6 +201,11 @@ int16_t LoadPrefs(void) {
             gShockPrefs.goCaptureMouse = is_true(value);
         } else if (strcasecmp(key, PREF_INVERTMOUSEY) == 0) {
             gShockPrefs.goInvertMouseY = is_true(value);
+        } else if (strcasecmp(key, PREF_REPLACEMENT_MEDICAL) == 0) {
+            legacy_remake = is_true(value);
+        } else if (strcasecmp(key, PREF_SOUNDTRACK) == 0) {
+            gShockPrefs.soSoundtrack = ExternalMusicMode(value);
+            soundtrack_seen = 1;
         } else if (strcasecmp(key, PREF_MUSIC_VOL) == 0) {
             int vol = atoi(value);
             if (vol >= 0 && vol <= 100) {
@@ -246,6 +267,7 @@ int16_t LoadPrefs(void) {
     }
 
     fclose(f);
+    if (!soundtrack_seen && legacy_remake) gShockPrefs.soSoundtrack = SOUNDTRACK_REMAKE;
     SetShockGlobals();
     return 0;
 }
@@ -266,6 +288,10 @@ int16_t SavePrefs(void) {
     fprintf(f, "%s = %s\n", PREF_CAPTUREMOUSE, gShockPrefs.goCaptureMouse ? "yes" : "no");
     fprintf(f, "%s = %s\n", PREF_INVERTMOUSEY, gShockPrefs.goInvertMouseY ? "yes" : "no");
     fprintf(f, "%s = %d\n", PREF_MUSIC_VOL, curr_vol_lev);
+    fprintf(f, "%s = %s\n", PREF_SOUNDTRACK, ExternalMusicModeName(gShockPrefs.soSoundtrack));
+#ifdef RP5NP_QA_TOOLS
+    fprintf(f, "qa_cheats = %s\n", gShockPrefs.qaCheats ? "true" : "false");
+#endif
     fprintf(f, "%s = %d\n", PREF_SFX_VOL, sfx_on ? curr_sfx_vol : 0);
     fprintf(f, "%s = %d\n", PREF_ALOG_VOL, curr_alog_vol);
     fprintf(f, "%s = %d\n", PREF_VIDEOMODE, mode_id);

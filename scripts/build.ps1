@@ -4,11 +4,15 @@ param(
     [string]$AndroidSdk = '',
     [string]$JavaHome = $env:JAVA_HOME,
     [string]$DepsRoot = (Join-Path (Split-Path -Parent $PSScriptRoot) '.deps'),
-    [switch]$SkipGitCleanCheck
+    [switch]$SkipGitCleanCheck,
+    [switch]$AudioDiagnostics
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+if ($AudioDiagnostics -and $Variant -ne 'qa') {
+    throw 'AudioDiagnostics is restricted to the separate QA application.'
+}
 
 $Root = Split-Path -Parent $PSScriptRoot
 $Preflight = Join-Path $PSScriptRoot 'preflight.ps1'
@@ -60,7 +64,7 @@ $VariantInfo = switch ($Variant) {
 $AndroidProject = Join-Path $Root 'AndroidProject'
 Push-Location $AndroidProject
 try {
-    & .\gradlew.bat --no-daemon $VariantInfo.Task
+    & .\gradlew.bat --no-daemon $VariantInfo.Task "-Prp5npAudioDiagnostics=$($AudioDiagnostics.IsPresent.ToString().ToLowerInvariant())"
     if ($LASTEXITCODE -ne 0) {
         throw "Gradle build failed: $LASTEXITCODE"
     }

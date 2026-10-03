@@ -19,7 +19,14 @@ static int radial_category(TouchAction action) {
     if (action==TOUCH_WEAPON_NEXT) return TOUCH_RADIAL_WEAPON;
     if (action==TOUCH_CONSUMABLE) return TOUCH_RADIAL_CONSUMABLE;
     if (action==TOUCH_EXPLOSIVE) return TOUCH_RADIAL_EXPLOSIVE;
+    if (action==TOUCH_AMMO) return TOUCH_RADIAL_AMMO;
     return -1;
+}
+static bool radial_enabled(const TouchControls *t, int category) {
+    /* Ammo is available immediately; the three existing optional wheel
+       preferences and their stored values retain their original meaning. */
+    return category==TOUCH_RADIAL_AMMO ||
+           (category>=0 && category<3 && t->settings.wheel_enabled[category]);
 }
 
 void touch_init(TouchControls *t, TouchEmit callback, void *user) {
@@ -104,18 +111,22 @@ static void move_finger(TouchControls *t, TouchFinger *f, float x, float y) {
 
 void touch_tick(TouchControls *t, uint32_t now_ms) {
     if (!t->enabled || !t->gameplay_available || t->controller ||
-        t->effective_mode!=TOUCH_GAMEPLAY || t->panel!=TOUCH_UI_CLOSED || t->radial.open) return;
+        t->panel!=TOUCH_UI_CLOSED || t->radial.open) return;
     for (int i=0;i<TOUCH_MAX_FINGERS;++i) {
         TouchFinger *f=&t->fingers[i];
         if (!f->active || !f->radial_pending || f->radial_cancelled ||
             (uint32_t)(now_ms-f->down_ms)<TOUCH_RADIAL_HOLD_MS) continue;
+        int category=radial_category(f->action);
+        if (t->effective_mode!=TOUCH_GAMEPLAY && category!=TOUCH_RADIAL_AMMO) continue;
         /* Refuse a wheel during a held attack/use; require a fresh gesture. */
         f->radial_pending=false;
-        if (t->fire_count || t->use_count) { f->radial_cancelled=true; continue; }
-        int category=radial_category(f->action);
+        if (t->fire_count || t->use_count || t->cursor_owner>=0) {
+            f->radial_cancelled=true; continue;
+        }
         TouchRadialEntry entries[TOUCH_RADIAL_MAX_ENTRIES]={{0}};
         int count=t->radial_populate ? t->radial_populate(t->user,(TouchRadialCategory)category,entries) : 0;
         if (count<0 || count>TOUCH_RADIAL_MAX_ENTRIES ||
+            (category==TOUCH_RADIAL_AMMO && !count) ||
             !touch_radial_open(&t->radial,i,(TouchRadialCategory)category,
                                t->layout.width,t->layout.height,entries,count)) {
             f->radial_cancelled=true;
@@ -171,8 +182,11 @@ void touch_finger(TouchControls *t, TouchPhase phase, int64_t device, int64_t id
             haptic(t,2);
             touch_set_mode(t, t->mode == TOUCH_GAMEPLAY ? TOUCH_CURSOR : TOUCH_GAMEPLAY);
             role = TOUCH_MODE_TOGGLE;
+        } else if (!t->controller && t->gameplay_available &&
+                   in_circle(x,y,t->layout.action[TOUCH_AMMO])) {
+            role = TOUCH_ACTION;
         } else if (t->effective_mode == TOUCH_CURSOR) {
-            if (t->cursor_owner < 0) role = TOUCH_CURSOR_OWNER;
+            if (!t->radial.open && t->cursor_owner < 0) role = TOUCH_CURSOR_OWNER;
         } else {
             for (int action = 0; action < TOUCH_PAUSE; ++action)
                 if (in_circle(x, y, t->layout.action[action])) {
@@ -197,7 +211,7 @@ void touch_finger(TouchControls *t, TouchPhase phase, int64_t device, int64_t id
                     f->action = (TouchAction)action; break;
                 }
             int category=radial_category(f->action);
-            if (category>=0 && t->settings.wheel_enabled[category]) {
+            if (radial_enabled(t,category)) {
                 /* A pending wheel owns this tap until release or hold. */
                 if (t->radial.open) f->radial_cancelled=true;
                 else f->radial_pending=true;
@@ -248,7 +262,8 @@ void touch_finger(TouchControls *t, TouchPhase phase, int64_t device, int64_t id
         if (f->dragging) {
             emit(t, TOUCH_POINTER_MOVE, x, y);
             if (phase == TOUCH_UP) emit(t, TOUCH_POINTER_UP, x, y);
-        } else if (phase == TOUCH_UP && timestamp_ms - f->down_ms <= TOUCH_TAP_MS) {
+        } else if (phase == TOUCH_UP && timestamp_ms - f->down_ms <=
+                   (t->gameplay_available ? TOUCH_TAP_MS : TOUCH_MENU_TAP_MS)) {
             /* Anchor taps to their initial position so small jitter cannot
                move a click onto the neighbouring small original UI target. */
             emit(t, TOUCH_POINTER_TAP, f->start_x, f->start_y);

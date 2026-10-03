@@ -42,6 +42,7 @@ typedef struct {
     // Sound Options
     bool soBackMusic;
     bool soSoundFX;
+    int soSoundtrack; // ExternalMusic mode; default Original, never part of saves
     short soMusicVolume;
     short soSfxVolume;
     short soAudioLogVolume;
@@ -59,6 +60,9 @@ typedef struct {
     // 1 => bilinear
     // TODO: add trilinear, anisotropic?
     short doTextureFilter;
+#ifdef RP5NP_QA_TOOLS
+    bool qaCheats; // Separate QA application only; default OFF, not save data.
+#endif
 } ShockPrefs;
 
 //--------------------

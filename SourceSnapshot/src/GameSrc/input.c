@@ -102,11 +102,93 @@ static void touch_radial_label(char out[24], const char *name, int id) {
     out[i]=0;
 }
 
+static weapon_slot *touch_ammo_weapon(int *slot, int *gun, int *subclass) {
+    int active=player_struct.actives[ACTIVE_WEAPON];
+    if (active<0 || active>=NUM_WEAPON_SLOTS) return NULL;
+    weapon_slot *ws=&player_struct.weapons[active];
+    if (ws->type>=num_subclasses[CLASS_GUN] ||
+        ws->subtype>=num_types(CLASS_GUN,ws->type) ||
+        is_energy_weapon(ws->type) || is_handtohand_weapon(ws->type)) return NULL;
+    int triple=MAKETRIP(CLASS_GUN,ws->type,ws->subtype), index=CPTRIP(triple);
+    if (index<0 || index>=NUM_GUN) return NULL;
+    int ammo=GunProps[index].useable_ammo_type;
+    int sc=AMMOTYPE_SUBCLASS(ammo);
+    if (!AMMOTYPE_TYPE(ammo) || sc<0 || sc>=num_subclasses[CLASS_AMMO] ||
+        ws->ammo_type>=num_types(CLASS_AMMO,sc) ||
+        !(AMMOTYPE_TYPE(ammo)&(1u<<ws->ammo_type))) return NULL;
+    int current=CPTRIP(MAKETRIP(CLASS_AMMO,sc,ws->ammo_type));
+    int clip=AmmoProps[current].cartridge_size;
+    unsigned returned=(unsigned)player_struct.partial_clip[current]+ws->ammo;
+    if (clip<=0 || returned>255 ||
+        player_struct.cartridges[current]+returned/(unsigned)clip>255) return NULL;
+    *slot=active; *gun=index; *subclass=sc;
+    return ws;
+}
+
+/* New touch reload button uses the game's same-ammo reload hotkey. Keyboard
+   and controller ammo-cycle semantics stay on their existing handlers. */
+static void touch_game_radial_short_ammo(void) {
+    int slot,gun,sc;
+    if (touch_ammo_weapon(&slot,&gun,&sc)) reload_weapon_hotkey(0,DEMO_CONTEXT,0);
+}
+
+static int touch_ammo_snapshot(TouchRadialEntry entries[TOUCH_RADIAL_MAX_ENTRIES]) {
+    int slot,gun,sc;
+    weapon_slot *ws=touch_ammo_weapon(&slot,&gun,&sc);
+    if (!ws) return 0;
+    TouchRadialEntry *reload=&entries[0];
+    *reload=(TouchRadialEntry){0};
+    reload->id=TOUCH_AMMO_RELOAD_ID(slot,gun);
+    strcpy(reload->label,"RELOAD");
+    reload->available=ws->ammo>0;
+    reload->count=ws->ammo;
+    int count=1;
+    unsigned compatible=AMMOTYPE_TYPE(GunProps[gun].useable_ammo_type);
+    for (int type=0;type<3 && type<num_types(CLASS_AMMO,sc);++type) {
+        if (!(compatible&(1u<<type))) continue;
+        int triple=MAKETRIP(CLASS_AMMO,sc,type), ammo=CPTRIP(triple);
+        if (ammo<0 || ammo>=NUM_AMMO_TYPES) continue;
+        unsigned reserve=(unsigned)player_struct.cartridges[ammo]*AmmoProps[ammo].cartridge_size+
+                         player_struct.partial_clip[ammo];
+        unsigned loaded=ws->ammo_type==type ? ws->ammo : 0;
+        if (!reserve && !loaded) continue;
+        reload->available=true;
+        TouchRadialEntry *e=&entries[count++];
+        *e=(TouchRadialEntry){0};
+        e->id=TOUCH_AMMO_TYPE_ID(slot,gun,type);
+        e->available=true; e->current=ws->ammo_type==type;
+        e->count=reserve+loaded;
+        char name[64]={0};
+        get_object_short_name(triple,name,sizeof(name));
+        touch_radial_label(e->label,name,type);
+    }
+    return count;
+}
+
+static bool touch_ammo_select(int id) {
+    int slot,gun,sc;
+    weapon_slot *ws=touch_ammo_weapon(&slot,&gun,&sc);
+    if (!ws) return false;
+    TouchRadialEntry fresh[TOUCH_RADIAL_MAX_ENTRIES]={{0}};
+    int count=touch_ammo_snapshot(fresh), choice=-1;
+    for (int i=0;i<count;++i) if (fresh[i].id==id && fresh[i].available) choice=i;
+    if (choice<0) return false; /* stale gun, slot or depleted reserve */
+    if (id==TOUCH_AMMO_RELOAD_ID(slot,gun)) return reload_weapon_hotkey(0,DEMO_CONTEXT,0)!=FALSE;
+    int type=id-TOUCH_AMMO_CONTEXT(slot,gun)-1;
+    if (type<0 || type>=3) return false;
+    /* Same operations as the native weapon MFD; all quantities stay owned by
+       the native unload/reload functions. Never call both hotkey and MFD. */
+    unload_current_weapon();
+    mfd_notify_func(MFD_WEAPON_FUNC,MFD_WEAPON_SLOT,FALSE,MFD_ACTIVE,TRUE);
+    return change_ammo_type((ubyte)type)!=FALSE;
+}
+
 int touch_game_radial_snapshot(TouchRadialCategory category,
                                TouchRadialEntry entries[TOUCH_RADIAL_MAX_ENTRIES]) {
     int count=0,limit=category==TOUCH_RADIAL_WEAPON ? NUM_WEAPON_SLOTS :
                       category==TOUCH_RADIAL_CONSUMABLE ? NUM_DRUGZ : NUM_GRENADEZ;
     if (!entries || category<0 || category>=TOUCH_RADIAL_CATEGORY_COUNT) return 0;
+    if (category==TOUCH_RADIAL_AMMO) return touch_ammo_snapshot(entries);
     for (int i=0;i<limit && count<TOUCH_RADIAL_MAX_ENTRIES;++i) {
         unsigned quantity=category==TOUCH_RADIAL_WEAPON ?
             (player_struct.weapons[i].type!=EMPTY_WEAPON_SLOT) :
@@ -131,6 +213,7 @@ int touch_game_radial_snapshot(TouchRadialCategory category,
 }
 
 bool touch_game_radial_select(TouchRadialCategory category, int id) {
+    if (category==TOUCH_RADIAL_AMMO) return touch_ammo_select(id);
     if (category==TOUCH_RADIAL_WEAPON)
         return touch_select_weapon_slot(id)!=FALSE;
     if (category==TOUCH_RADIAL_CONSUMABLE) {
@@ -1234,6 +1317,9 @@ static void rp5np_controller_game_action(rp5np_controller_action action, void *u
     (void)userdata;
 
     switch (action) {
+    case RP5NP_CONTROLLER_ACTION_TOUCH_AMMO:
+        touch_game_radial_short_ammo();
+        break;
     case RP5NP_CONTROLLER_ACTION_CROUCH_TOGGLE:
         if (player_struct.posture == POSTURE_STOOP || player_struct.posture == POSTURE_PRONE)
             player_set_posture(POSTURE_STAND);
@@ -3452,6 +3538,13 @@ static bool touch_ui_object_region(const LGRegion *region, int x, int y) {
 }
 
 TouchCursorTarget touch_cursor_target_at(int x, int y) {
+    extern uchar wrapper_panel_on, olh_overlay_on;
+    /* Setup makes its full-screen root the current view too; it is a menu,
+       not a world target requiring the gameplay double-click sequence. */
+    if ((_current_loop != GAME_LOOP && _current_loop != FULLSCREEN_LOOP &&
+         _current_loop != SVGA_LOOP) || (_change_flag & GL_CHG_LOOP) ||
+        wrapper_panel_on || olh_overlay_on || game_paused)
+        return TOUCH_TARGET_UI_CONTROL;
     short ux = (short)x, uy = (short)y;
     ss_mouse_convert(&ux, &uy, TRUE);
     TouchCursorTarget target = touch_classify_view_region(_current_view, ux, uy,

@@ -19,7 +19,8 @@ const TouchDefault touch_defaults[TC_COUNT] = {
     {"consumable", "CONS", .52f,.10f,.045f}, {"explosive", "BOOM", .63f,.10f,.045f},
     {"sprint", "RUN", .22f,.54f,.05f}, {"target", "ID", .73f,.10f,.045f},
     {"pause", "II", .05f,.06f,.045f}, {"mode", "MODE", .88f,.0825f,0},
-    {"settings", "SET", .16f,.06f,.035f}, {"stick", "MOVE", .20f,.77f,.11f}
+    {"settings", "SET", .16f,.06f,.035f}, {"stick", "MOVE", .20f,.77f,.11f},
+    {"ammo", "AMMO", .43f,.10f,.045f}
 };
 static float bounded(float v, float low, float high, float fallback) {
     return !isfinite(v) ? fallback : fmaxf(low, fminf(high, v));

@@ -555,6 +555,8 @@ void pushbutton_draw_func(uchar butid) {
 }
 
 uchar pushbutton_handler(uiEvent *ev, uchar butid) {
+    if (ev->type == UI_EVENT_MOUSE &&
+        (ev->mouse_data.modifiers & MOUSE_MOD_TOUCH_DRAG)) return FALSE;
     if (((ev->type == UI_EVENT_MOUSE) && (ev->subtype & MOUSE_DOWN)) ||
         ((ev->type == UI_EVENT_KBD_COOKED) &&
          ((ev->cooked_key_data.code & 0xFF) == OButtons[butid].user.pushbutton_st.keyeq))) {
@@ -691,6 +693,9 @@ void multi_draw_func(uchar butid) {
 uchar multi_handler(uiEvent *ev, uchar butid) {
     uint val = 0, delta = 0;
     opt_multi_state *st = &OButtons[butid].user.multi_st;
+
+    if (ev->type == UI_EVENT_MOUSE &&
+        (ev->mouse_data.modifiers & MOUSE_MOD_TOUCH_DRAG)) return FALSE;
 
     if (ev->type == UI_EVENT_MOUSE) {
         if (ev->subtype & MOUSE_LEFT)
@@ -867,6 +872,9 @@ void textlist_select_line(opt_textlist_state *st, uchar butid, uchar line, uchar
 uchar textlist_handler(uiEvent *ev, uchar butid) {
     uchar line;
     opt_textlist_state *st = &OButtons[butid].user.textlist_st;
+
+    if (ev->type == UI_EVENT_MOUSE &&
+        (ev->mouse_data.modifiers & MOUSE_MOD_TOUCH_DRAG)) return FALSE;
 
     if ((ev->type == UI_EVENT_MOUSE) && (ev->subtype & MOUSE_DOWN)) {
         short w, h;
