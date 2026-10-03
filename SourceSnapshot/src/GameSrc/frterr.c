@@ -43,6 +43,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "frsubclp.h"
 #include "rendtool.h"
 #include "textmaps.h" // pain, sadness
+#include "horror_visuals.h"
 
 #define FLIP_BITS
 
@@ -290,6 +291,13 @@ int _fr_do_light_val(int which, fix dist_val) {
     our_mp += csp_trans_add[_fdt_pbase];
     set_terr_light(our_mp, which);
     i <<= 8;
+    if (horror_visuals_scalar_active()) {
+        int sample=(int)(our_mp-MAP_MAP);
+        int ceiling=which==FRPTSZCEIL_DN;
+        i=horror_visuals_light(ceiling ? me_light_ceil(our_mp) : me_light_flr(our_mp),
+            ceiling ? me_templight_ceil(our_mp) : me_templight_flr(our_mp),
+            ceiling,sample%global_fullmap->x_size,sample/global_fullmap->x_size);
+    }
 
     // speed this up, add fast dist check to trivial reject it.. ick, is this correct
     // secret sacred secret sacred secret gnosis... neat, eh?
@@ -1158,6 +1166,8 @@ void hack_show(fix edward[4][2]) {
 
 // renders icnt of final_walls
 void _render_3d_walls(int which, int cnt) {
+    HorrorScope visual_wall=horror_visuals_bind(_fdt_x,_fdt_y,HV_WALL,
+                                               loved_textures[_game_fr_tmap],0);
     WallsToPts *wpt = &wall_pts[FROUTERWALLS + which];
     _fdt_wallid = which;
     flip_setup(which);
@@ -1204,6 +1214,7 @@ void _render_3d_walls(int which, int cnt) {
     case 0:
         break;
     }
+    horror_visuals_restore(visual_wall);
 }
 
     // currently always assumes full width... ie. is really broken
@@ -1469,6 +1480,8 @@ void fr_draw_tile(void) {
             fr_terr_cspace_pick(last_csp_fr = tmp);
     }
 
+    HorrorScope visual_scope=horror_visuals_bind(_fdt_x,_fdt_y,HV_WALL,
+                                                loved_textures[_fdt_wmap],0);
     // how about external walls, eh?
     wall_check(FMK_NW, FRWALLNORTH, 0);
     wall_check(FMK_EW, FRWALLEAST, 1);
@@ -1508,9 +1521,14 @@ void fr_draw_tile(void) {
     _fdt_cur_parm = _fdt_fix_parm;
 #endif
     _game_fr_tmap = me_tmap_flr(_fdt_mptr);
+    horror_visuals_restore(visual_scope);
+    visual_scope=horror_visuals_bind(_fdt_x,_fdt_y,HV_FLOOR,loved_textures[_game_fr_tmap],0);
     _fr_terr_flr();
     _game_fr_tmap = me_tmap_ceil(_fdt_mptr);
+    horror_visuals_restore(visual_scope);
+    visual_scope=horror_visuals_bind(_fdt_x,_fdt_y,HV_CEILING,loved_textures[_game_fr_tmap],0);
     _fr_terr_ceil();
+    horror_visuals_restore(visual_scope);
     // now check object cache
 
     // FIXME HAX HAX HAX why does this segfault?

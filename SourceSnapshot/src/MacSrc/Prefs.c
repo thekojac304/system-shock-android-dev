@@ -1,3 +1,4 @@
+#include "GpuWorld.h"
 /*
 
 Copyright (C) 2015-2018 Night Dive Studios, LLC.
@@ -129,6 +130,7 @@ void SetDefaultPrefs(void) {
     gShockPrefs.doTextureFilter = 0; // unfiltered
     gShockPrefs.goOnScreenHelp = true;
     gShockPrefs.doGamma = 29;    // Default gamma (29 out of 100).
+    gShockPrefs.doHorrorVisuals = false;
     gShockPrefs.goMsgLength = 0; // Normal
     audiolog_setting = 1;
 
@@ -179,6 +181,7 @@ int16_t LoadPrefs(void) {
     int soundtrack_seen = 0, legacy_remake = 0;
     gShockPrefs.soSoundtrack = SOUNDTRACK_ORIGINAL;
     char line[64];
+    gShockPrefs.doHorrorVisuals = false;
     while (fgets(line, sizeof(line), f)) {
         char *eq = strchr(line, '=');
         if (!eq)
@@ -193,7 +196,14 @@ int16_t LoadPrefs(void) {
             gShockPrefs.qaCheats = is_true(value);
         } else
 #endif
-        if (strcasecmp(key, PREF_LANGUAGE) == 0) {
+        if (strcasecmp(key, "world-visuals") == 0) {
+            gShockPrefs.doHorrorVisuals =
+#ifdef RP5NP_GPU_WORLD
+                strcasecmp(value, "gpu-prototype") == 0 ? 3 :
+#endif
+                strcasecmp(value, "horror") == 0 ? 2 :
+                (strcasecmp(value, "enhanced") == 0 || strcasecmp(value, "conservative") == 0 ? 1 : 0);
+        } else if (strcasecmp(key, PREF_LANGUAGE) == 0) {
             int lang = atoi(value);
             if (lang >= 0 && lang <= 2)
                 gShockPrefs.goLanguage = lang;
@@ -301,6 +311,8 @@ int16_t SavePrefs(void) {
     fprintf(f, "%s = %d\n", PREF_TEX_FILTER, gShockPrefs.doTextureFilter);
     fprintf(f, "%s = %s\n", PREF_ONSCR_HELP, gShockPrefs.goOnScreenHelp ? "yes" : "no");
     fprintf(f, "%s = %d\n", PREF_GAMMA, gShockPrefs.doGamma);
+    fprintf(f, "world-visuals = %s\n", gShockPrefs.doHorrorVisuals == 3 ? "gpu-prototype" : gShockPrefs.doHorrorVisuals == 2 ? "horror" :
+            gShockPrefs.doHorrorVisuals == 1 ? "enhanced" : "original");
     fprintf(f, "%s = %d\n", PREF_MSG_LENGTH, gShockPrefs.goMsgLength);
     fprintf(f, "%s = %d\n", PREF_ALOG_SETTING, audiolog_setting);
     fprintf(f, "%s = %d\n", PREF_MIDI_BACKEND, gShockPrefs.soMidiBackend);
@@ -577,7 +589,7 @@ HOTKEYLOOKUP HotKeyLookup[] = {
     {"\"arm_grenade\"", DEMO_CONTEXT, arm_grenade_hotkey, 0, 0, ALT('\''), 0},
     {"\"use_drug\"", DEMO_CONTEXT, use_drug_hotkey, 0, 0, ALT(';'), 0},
     {"\"hud_color\"", DEMO_CONTEXT, hud_color_bank_cycle, 0, 0, ALT('h'), 0},
-    {"\"showhelp\"", DEMO_CONTEXT, olh_overlay_func, (intptr_t)&olh_overlay_on, 0, ALT('o'), 0},    
+    {"\"showhelp\"", DEMO_CONTEXT, olh_overlay_func, (intptr_t)&olh_overlay_on, 0, ALT('o'), 0},
     {"\"bio scan\"", DEMO_CONTEXT, hw_hotkey_callback, 5, 0, 49, 0},
     {"\"fullscreen\"", DEMO_CONTEXT, hw_hotkey_callback, 10, 0, 50, 0},
     {"\"360 view\"", DEMO_CONTEXT, hw_hotkey_callback, 2, 0, 51, 0},

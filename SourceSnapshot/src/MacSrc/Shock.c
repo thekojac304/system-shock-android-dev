@@ -1,3 +1,4 @@
+#include "GpuWorld.h"
 /*
 
 Copyright (C) 2015-2018 Night Dive Studios, LLC.
@@ -240,9 +241,25 @@ void InitSDL() {
     sprintf(window_title, "System Shock - %s", SHOCKOLATE_VERSION);
 
 #ifdef __ANDROID__
+#ifdef RP5NP_GPU_WORLD
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK,SDL_GL_CONTEXT_PROFILE_ES);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION,3);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION,0);
+#endif
     // Android owns fullscreen/immersive policy. Let SDL bind to the one native Surface.
     window = SDL_CreateWindow(window_title, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, grd_cap->w, grd_cap->h,
-                              SDL_WINDOW_ALLOW_HIGHDPI);
+                              SDL_WINDOW_ALLOW_HIGHDPI
+#ifdef RP5NP_GPU_WORLD
+                              | SDL_WINDOW_OPENGL
+#endif
+                              );
+#ifdef RP5NP_GPU_WORLD
+    if (!window) {
+        SDL_Log("GPU1B ES3 window failed: %s; retry software presenter ES2",SDL_GetError());
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION,2);
+        window=SDL_CreateWindow(window_title,SDL_WINDOWPOS_CENTERED,SDL_WINDOWPOS_CENTERED,grd_cap->w,grd_cap->h,SDL_WINDOW_ALLOW_HIGHDPI);
+    }
+#endif
     if (window == NULL) {
         SDL_Log("RP5NP_NATIVE_WINDOW_FAIL error=%s", SDL_GetError());
     } else {
@@ -274,6 +291,17 @@ void InitSDL() {
 
 #ifdef __ANDROID__
     renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+#ifdef RP5NP_GPU_WORLD
+    if (!renderer && window) {
+        SDL_Log("GPU1B ES3 presenter failed: %s; retry software presenter ES2", SDL_GetError());
+        SDL_DestroyWindow(window);
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
+        window = SDL_CreateWindow(window_title, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
+                                  grd_cap->w, grd_cap->h, SDL_WINDOW_ALLOW_HIGHDPI);
+        if (window) renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+        gShockPrefs.doHorrorVisuals = 0;
+    }
+#endif
 #else
     renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_PRESENTVSYNC);
 #endif
@@ -332,6 +360,7 @@ void InitSDL() {
 SDL_Color gamePalette[256];
 bool UseCutscenePalette = FALSE; // see cutsloop.c
 void SetSDLPalette(int index, int count, uchar *pal) {
+    gpu_world_palette(index,count,pal);
     static bool gammalut_init = 0;
     static uchar gammalut[100 - 10 + 1][256];
     if (!gammalut_init) {
@@ -381,6 +410,9 @@ void SetSDLPalette(int index, int count, uchar *pal) {
 }
 
 void SDLDraw() {
+    extern uint64_t horror_visuals_clock(void);
+    extern void horror_visuals_present_measure(uint64_t,uint64_t,uint64_t);
+    uint64_t visual_start=horror_visuals_clock();
     if (should_opengl_swap()) {
         // We want the UI background to be transparent!
         sdlPalette->colors[255].a = 0x00;
@@ -396,7 +428,12 @@ void SDLDraw() {
     // Clear the screen!
     SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
     SDL_RenderClear(renderer);
+    int gpu_composed=gpu_world_compose();
+    SDL_Color transparent=sdlPalette->colors[255],original=transparent;
+    if(gpu_composed){transparent.a=0;SDL_SetPaletteColors(sdlPalette,&transparent,255,1);}
     SDL_Texture *texture = SDL_CreateTextureFromSurface(renderer, drawSurface);
+    if(gpu_composed){SDL_SetPaletteColors(sdlPalette,&original,255,1);SDL_SetTextureBlendMode(texture,SDL_BLENDMODE_BLEND);}
+    uint64_t visual_converted=visual_start ? horror_visuals_clock() : 0;
 
     // Blit to the screen by drawing the surface 
     SDL_Rect srcRect = {0, 0, gScreenWide, gScreenHigh};
@@ -408,7 +445,9 @@ void SDLDraw() {
     touch_bridge_draw();
 #endif
     // Show everything we've drawn
+    uint64_t visual_submitted=visual_start ? horror_visuals_clock() : 0;
     SDL_RenderPresent(renderer);
+    horror_visuals_present_measure(visual_start,visual_converted,visual_submitted);
 }
 
 bool MouseCaptured = FALSE;

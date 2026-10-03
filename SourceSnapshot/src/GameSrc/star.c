@@ -1,3 +1,4 @@
+#include "GpuWorld.h"
 /*
 
 Copyright (C) 2015-2018 Night Dive Studios, LLC.
@@ -168,6 +169,7 @@ void star_poly(int n, g3s_phandle *vp) {
 }
 
 void star_empty(int n, g3s_phandle *vp) {
+    gpu_world_reject("sky/stars");
     int i;
     fix m;
     int n1;

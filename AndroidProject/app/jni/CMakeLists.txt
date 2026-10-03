@@ -77,3 +77,12 @@ if(RP5NP_AUDIO_DIAGNOSTICS)
     endforeach()
     include(audio_diag/instrument.cmake)
 endif()
+
+# GPU-RENDER1B is isolated to the existing QA application.
+if(RP5NP_QA_TOOLS)
+    target_sources(main PRIVATE "${RP5NP_SHOCKOLATE_SOURCE_DIR}/src/MacSrc/GpuWorld.c")
+    target_link_libraries(main GLESv3 EGL)
+    foreach(gpu_consumer main GAME_LIB 3D_LIB INPUT_LIB)
+        target_compile_definitions(${gpu_consumer} PRIVATE RP5NP_GPU_WORLD=1)
+    endforeach()
+endif()

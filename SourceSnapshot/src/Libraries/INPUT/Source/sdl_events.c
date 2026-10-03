@@ -1,3 +1,4 @@
+#include "GpuWorld.h"
 /*
 
 Copyright (C) 2015-2018 Night Dive Studios, LLC.
@@ -1076,6 +1077,7 @@ void pump_events(void) {
 #endif
 
     while (SDL_PollEvent(&ev)) {
+        gpu_world_event(&ev);
 #ifdef __ANDROID__
         touch_bridge_event(&ev);
 #endif

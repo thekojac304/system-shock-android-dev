@@ -1,0 +1,414 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * GPU-RENDER1B: bounded, ordered Medical proof. Software capture runs once and
+ * remains authoritative until the entire GPU view has succeeded. No readback. */
+#include "GpuWorld.h"
+#include "GlobalV.h"
+#include "Prefs.h"
+#include "Shock.h"
+#include "ShockBitmap.h"
+#include "frtypes.h"
+#include "frintern.h"
+#include "gameobj.h"
+#include "otrip.h"
+#include "frflags.h"
+#include "textmaps.h"
+#include "horror_profile.h"
+#include "map.h"
+#include "mapflags.h"
+#include "player.h"
+#include "drugs.h"
+#include "mainloop.h"
+#include "gr2ss.h"
+#include <GLES3/gl3.h>
+#include <EGL/egl.h>
+#include <math.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
+
+extern SDL_Renderer *renderer;
+extern bool UseCutscenePalette, DoubleSize;
+extern uchar full_game_3d;
+extern char curr_clut_table;
+extern uchar view360_is_rendering;
+extern int _game_fr_tmap;
+
+enum { MAX_DRAWS=4096, MAX_VERTICES=32768, MAX_TEXTURES=512 };
+typedef struct { float clip[4], world[3], uv[2], darkness; } Vertex;
+typedef struct { int first, count, texture, cutout, emissive, receivers; } Draw;
+/* Content-addressed resource identity: hash + dimensions + byte equality. CPU
+ * pixels are owned, including decoded RSD and temporary monitor/model sources.
+ * No bitmap address survives capture. GL names are disposable derived state. */
+typedef struct { uint64_t hash; int w,h; unsigned char *pixels; GLuint gl; unsigned used; } Texture;
+typedef struct { float x,y,ceiling_offset,radius,rgb[3],intensity; int tile_x,tile_y; } Light;
+static const Light medical_lights[2] = {
+    {30.0f,23.8f,0.35f,4.2f,{0.13f,0.8f,1.0f},2.4f,30,23},
+    {26.5f,20.5f,0.25f,3.2f,{1.0f,0.48f,0.015f},6.0f,26,20}
+};
+static const float medical_ambient[3]={0.065f,0.075f,0.085f};
+static Vertex vertices[MAX_VERTICES];
+static Draw draws[MAX_DRAWS];
+static Texture textures[MAX_TEXTURES];
+static int active, failed, object_id=-1, object_lit=1, ndraw, nvertex, ready, disabled;
+static unsigned frame, fallbacks, uploads, upload_bytes;
+static int retained, command_valid, view_w,view_h, gpu_w,gpu_h;
+static unsigned char *software_world;
+static size_t software_capacity;
+static SDL_Rect destination;
+static SDL_Texture *world;
+static GLuint program,vao,vbo,palette,depth;
+static SDL_GLContext context;
+static unsigned char palette_rgb[1024];
+static unsigned palette_generation=1, uploaded_palette;
+static float inverse[9],eye[3],light_pos[8],light_color[8];
+static uint64_t capture_start;
+static const char *failure;
+
+/* Only state actually changed by this pass is saved. Vertex attributes and
+ * EBO live in our private VAO; SDL's VAO/attribute pointers are never edited. */
+typedef struct {
+    GLint program,vao,vbo,active,tex[2],viewport[4],scissor[4],unpack,row,skiprows,skippixels,pbo;
+    GLint draw_fbo,read_fbo,renderbuffer;
+    GLboolean blend,depth,stencil,scissor_on,cull,mask[4],depthmask;
+    GLfloat clear[4];
+} Bridge;
+static void bridge_save(Bridge *s) {
+    SDL_RenderFlush(renderer);
+    glGetIntegerv(GL_CURRENT_PROGRAM,&s->program); glGetIntegerv(GL_VERTEX_ARRAY_BINDING,&s->vao);
+    glGetIntegerv(GL_ARRAY_BUFFER_BINDING,&s->vbo); glGetIntegerv(GL_ACTIVE_TEXTURE,&s->active);
+    for(int i=0;i<2;i++){glActiveTexture(GL_TEXTURE0+i);glGetIntegerv(GL_TEXTURE_BINDING_2D,&s->tex[i]);}
+    glGetIntegerv(GL_VIEWPORT,s->viewport);glGetIntegerv(GL_SCISSOR_BOX,s->scissor);
+    glGetIntegerv(GL_UNPACK_ALIGNMENT,&s->unpack);glGetIntegerv(GL_UNPACK_ROW_LENGTH,&s->row);
+    glGetIntegerv(GL_UNPACK_SKIP_ROWS,&s->skiprows);glGetIntegerv(GL_UNPACK_SKIP_PIXELS,&s->skippixels);
+    glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING,&s->pbo);
+    glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING,&s->draw_fbo);glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING,&s->read_fbo);
+    glGetIntegerv(GL_RENDERBUFFER_BINDING,&s->renderbuffer);
+    s->blend=glIsEnabled(GL_BLEND);s->depth=glIsEnabled(GL_DEPTH_TEST);s->stencil=glIsEnabled(GL_STENCIL_TEST);
+    s->scissor_on=glIsEnabled(GL_SCISSOR_TEST);s->cull=glIsEnabled(GL_CULL_FACE);
+    glGetBooleanv(GL_COLOR_WRITEMASK,s->mask);glGetBooleanv(GL_DEPTH_WRITEMASK,&s->depthmask);
+    glGetFloatv(GL_COLOR_CLEAR_VALUE,s->clear);
+}
+static void enable(GLenum c,GLboolean on){if(on)glEnable(c);else glDisable(c);}
+static void bridge_restore(const Bridge *s) {
+    glUseProgram(s->program);glBindVertexArray(s->vao);glBindBuffer(GL_ARRAY_BUFFER,s->vbo);
+    for(int i=0;i<2;i++){glActiveTexture(GL_TEXTURE0+i);glBindTexture(GL_TEXTURE_2D,s->tex[i]);}
+    glActiveTexture(s->active);glViewport(s->viewport[0],s->viewport[1],s->viewport[2],s->viewport[3]);
+    glScissor(s->scissor[0],s->scissor[1],s->scissor[2],s->scissor[3]);
+    glPixelStorei(GL_UNPACK_ALIGNMENT,s->unpack);glPixelStorei(GL_UNPACK_ROW_LENGTH,s->row);
+    glPixelStorei(GL_UNPACK_SKIP_ROWS,s->skiprows);glPixelStorei(GL_UNPACK_SKIP_PIXELS,s->skippixels);
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER,s->pbo);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER,s->draw_fbo);glBindFramebuffer(GL_READ_FRAMEBUFFER,s->read_fbo);
+    glBindRenderbuffer(GL_RENDERBUFFER,s->renderbuffer);
+    enable(GL_BLEND,s->blend);enable(GL_DEPTH_TEST,s->depth);enable(GL_STENCIL_TEST,s->stencil);
+    enable(GL_SCISSOR_TEST,s->scissor_on);enable(GL_CULL_FACE,s->cull);
+    glColorMask(s->mask[0],s->mask[1],s->mask[2],s->mask[3]);glDepthMask(s->depthmask);
+    glClearColor(s->clear[0],s->clear[1],s->clear[2],s->clear[3]);
+}
+static const char *vs =
+    "#version 300 es\nprecision highp float;\n"
+    "layout(location=0) in vec4 pos;layout(location=1) in vec3 wp;"
+    "layout(location=2) in vec2 uv;layout(location=3) in float darkness;"
+    "out vec3 W;out vec2 U;out float D;"
+    "void main(){gl_Position=pos;W=wp;U=uv;D=darkness;}";
+static const char *fs =
+    "#version 300 es\nprecision highp float;precision highp usampler2D;\n"
+    "uniform usampler2D indices;uniform sampler2D pal;uniform int cutout,emissive,receivers;"
+    "uniform vec4 lights[2],colors[2];uniform vec3 ambient;uniform float gammaExponent;"
+    "in vec3 W;in vec2 U;in float D;out vec4 result;"
+    "void main(){ivec2 sz=textureSize(indices,0);"
+    "ivec2 tc=ivec2(floor(fract(U)*vec2(sz)));"
+    "uint idx=texelFetch(indices,tc,0).r;if(cutout!=0&&idx==0u)discard;"
+    "vec3 encoded=texelFetch(pal,ivec2(int(idx),0),0).rgb;"
+    "vec3 base=pow(encoded,vec3(2.2));"
+    "float s=pow(clamp(1.0-D/16.0,0.0,1.0),2.0);"
+    "vec3 illumination=ambient*s;"
+    "for(int j=0;j<2;j++){if((receivers&(1<<j))!=0){"
+    "float a=max(0.0,1.0-distance(W,lights[j].xyz)/lights[j].w);"
+    "illumination+=colors[j].rgb*colors[j].a*a*a;}}"
+    "bool selflit=idx==1u||(idx>=3u&&idx<=7u)||(idx>=11u&&idx<=31u);"
+    "vec3 linear=(emissive!=0||selflit)?base:base*illumination;"
+    "result=vec4(pow(clamp(linear,0.0,1.0),vec3(gammaExponent/2.2)),1.0);}";
+
+static int inject(const char *name) {
+    char path[96];snprintf(path,sizeof(path),"gpu-render1b-fail-%s.txt",name);
+    FILE *f=fopen(path,"r");if(!f)return 0;fclose(f);return 1;
+}
+void gpu_world_reject(const char *reason) {
+    if(active&&!failed){failed=1;failure=reason;}
+}
+int gpu_world_active(void){return active&&!failed;}
+static void log_fallback(const char *reason) {
+    static char last[160];++fallbacks;
+    if(strcmp(last,reason)||fallbacks%300==0){SDL_Log("GPU1B whole-view SOFTWARE reason=%s count=%u",reason,fallbacks);snprintf(last,sizeof(last),"%s",reason);}
+}
+static GLuint shader(GLenum type,const char *source) {
+    GLuint id=glCreateShader(type);glShaderSource(id,1,&source,NULL);glCompileShader(id);
+    GLint ok;char log[2048];glGetShaderiv(id,GL_COMPILE_STATUS,&ok);glGetShaderInfoLog(id,sizeof(log),NULL,log);
+    SDL_Log("GPU1B shader type=%x compile=%d log=%s",type,ok,log);
+    if(!ok){glDeleteShader(id);return 0;}return id;
+}
+/* Called only on the render thread. On real device reset names are forgotten,
+ * never deleted in the replacement context. On same-context resize dispose. */
+static void resources_dispose(int lost) {
+    retained=ready=0;
+    if(!lost){if(program)glDeleteProgram(program);glDeleteVertexArrays(1,&vao);glDeleteBuffers(1,&vbo);glDeleteTextures(1,&palette);glDeleteRenderbuffers(1,&depth);}
+    program=vao=vbo=palette=depth=0;
+    for(int i=0;i<MAX_TEXTURES;i++){if(!lost)glDeleteTextures(1,&textures[i].gl);textures[i].gl=0;}
+    if(world)SDL_DestroyTexture(world);world=NULL;uploaded_palette=0;
+}
+static int initialize(void) {
+    if(disabled){failure="GPU initialization disabled until mode retry";return 0;}
+    if(inject("es3")){failure="injected ES3 unavailable";return 0;}
+    const char *version=(const char*)glGetString(GL_VERSION);
+    if(!version||!strstr(version,"OpenGL ES 3")){failure="current context does not support GLES3";return 0;}
+    SDL_Log("GPU1B EGL=%s GL=%s GLSL=%s vendor=%s renderer=%s",
+        eglQueryString(eglGetCurrentDisplay(),EGL_VERSION),version,glGetString(GL_SHADING_LANGUAGE_VERSION),glGetString(GL_VENDOR),glGetString(GL_RENDERER));
+    Bridge state;bridge_save(&state);
+    GLuint vert=shader(GL_VERTEX_SHADER,inject("shader")?"#version 300 es\n intentional failure":vs);
+    GLuint frag=shader(GL_FRAGMENT_SHADER,fs);
+    GLint ok=0;
+    if(vert&&frag){program=glCreateProgram();glAttachShader(program,vert);glAttachShader(program,frag);glLinkProgram(program);glGetProgramiv(program,GL_LINK_STATUS,&ok);}
+    glDeleteShader(vert);glDeleteShader(frag);
+    char info[2048]={0};if(program)glGetProgramInfoLog(program,sizeof(info),NULL,info);
+    SDL_Log("GPU1B program link=%d log=%s",ok,info);
+    if(ok){
+        glGenVertexArrays(1,&vao);glBindVertexArray(vao);glGenBuffers(1,&vbo);glBindBuffer(GL_ARRAY_BUFFER,vbo);
+        const int sizes[]={4,3,2,1};const size_t offsets[]={0,4,7,9};
+        for(int i=0;i<4;i++){glEnableVertexAttribArray(i);glVertexAttribPointer(i,sizes[i],GL_FLOAT,GL_FALSE,sizeof(Vertex),(void*)(offsets[i]*sizeof(float)));}
+        glGenTextures(1,&palette);glGenRenderbuffers(1,&depth);
+    }
+    bridge_restore(&state);
+    if(!ok){failure="shader compilation/link failure";return 0;}
+    world=SDL_CreateTexture(renderer,SDL_PIXELFORMAT_ABGR8888,SDL_TEXTUREACCESS_TARGET,view_w,view_h);
+    if(!world){failure="SDL world target allocation failure";return 0;}
+    SDL_SetTextureBlendMode(world,SDL_BLENDMODE_NONE);SDL_SetTextureScaleMode(world,SDL_ScaleModeNearest);
+    SDL_Texture *old=SDL_GetRenderTarget(renderer);
+    if(SDL_SetRenderTarget(renderer,world)<0){failure="SDL world target bind failure";return 0;}
+    bridge_save(&state);
+    glBindRenderbuffer(GL_RENDERBUFFER,depth);glRenderbufferStorage(GL_RENDERBUFFER,GL_DEPTH24_STENCIL8,view_w,view_h);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER,GL_DEPTH_STENCIL_ATTACHMENT,GL_RENDERBUFFER,depth);
+    GLenum complete=glCheckFramebufferStatus(GL_FRAMEBUFFER),err=glGetError();
+    GLint red=0,green=0,blue=0,alpha=0;
+    glGetFramebufferAttachmentParameteriv(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,GL_FRAMEBUFFER_ATTACHMENT_RED_SIZE,&red);
+    glGetFramebufferAttachmentParameteriv(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,GL_FRAMEBUFFER_ATTACHMENT_GREEN_SIZE,&green);
+    glGetFramebufferAttachmentParameteriv(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,GL_FRAMEBUFFER_ATTACHMENT_BLUE_SIZE,&blue);
+    glGetFramebufferAttachmentParameteriv(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,GL_FRAMEBUFFER_ATTACHMENT_ALPHA_SIZE,&alpha);
+    SDL_Log("GPU1B selected world color bits=%d/%d/%d/%d",red,green,blue,alpha);
+    SDL_Log("GPU1B FBO=%x color=RGBA8 depth=24 stencil=8 size=%dx%d error=%x painter-order depth-test=OFF",complete,view_w,view_h,err);
+    bridge_restore(&state);SDL_SetRenderTarget(renderer,old);
+    if(inject("fbo")){failure="injected framebuffer creation failure";return 0;}
+    if(complete!=GL_FRAMEBUFFER_COMPLETE||err){failure="incomplete framebuffer or allocation GL error";return 0;}
+    ready=1;gpu_w=view_w;gpu_h=view_h;context=SDL_GL_GetCurrentContext();return 1;
+}
+static int texture_index(grs_bitmap *source) {
+    grs_bitmap decoded,*bm=source;
+    if(bm->type==BMT_RSD8){if(gr_rsd8_convert(bm,&decoded)!=GR_UNPACK_RSD8_OK){gpu_world_reject("RSD decode");return -1;}bm=&decoded;}
+    if(bm->type!=BMT_FLAT8||(bm->flags&BMF_TLUC8)||bm->w<=0||bm->h<=0||bm->w>1024||bm->h>1024||bm->row<bm->w){gpu_world_reject("bitmap format/translucency/dimensions");return -1;}
+    uint64_t hash=UINT64_C(1469598103934665603);
+    for(int y=0;y<bm->h;y++)for(int x=0;x<bm->w;x++){hash^=bm->bits[y*bm->row+x];hash*=UINT64_C(1099511628211);}
+    int free_slot=-1;
+    for(int i=0;i<MAX_TEXTURES;i++){
+        Texture *t=&textures[i];if(!t->pixels){if(free_slot<0)free_slot=i;continue;}
+        if(t->hash!=hash||t->w!=bm->w||t->h!=bm->h)continue;
+        int same=1;for(int y=0;y<bm->h;y++)if(memcmp(t->pixels+y*bm->w,bm->bits+y*bm->row,bm->w)){same=0;break;}
+        if(same){t->used=frame;return i;}
+    }
+    if(free_slot<0){gpu_world_reject("texture cache capacity");return -1;}
+    Texture *t=&textures[free_slot];t->pixels=malloc(bm->w*bm->h);
+    if(!t->pixels){gpu_world_reject("texture CPU allocation");return -1;}
+    for(int y=0;y<bm->h;y++)memcpy(t->pixels+y*bm->w,bm->bits+y*bm->row,bm->w);
+    t->hash=hash;t->w=bm->w;t->h=bm->h;t->used=frame;return free_slot;
+}
+static void world_position(const g3s_point *p,float *out) {
+    float v[]={p->gX/65536.f,p->gY/65536.f,p->gZ/65536.f},w[3];
+    for(int i=0;i<3;i++)w[i]=eye[i]+inverse[i*3]*v[0]+inverse[i*3+1]*v[1]+inverse[i*3+2]*v[2];
+    out[0]=w[0];out[1]=w[2];out[2]=-w[1];
+}
+static float clut_darkness(const unsigned char *clut) {
+    if(!clut)return 0;
+    uintptr_t c=(uintptr_t)clut,b=(uintptr_t)shading_table;
+    if(c<b||c>=b+4096||((c-b)&255)){gpu_world_reject("non-original CLUT");return 0;}
+    return (float)(c-b)/256.f;
+}
+static void metadata(Draw *d) {
+    int x=_fdt_x,y=_fdt_y,material=-1;
+    if(object_id>=0){x=objs[object_id].loc.x>>8;y=objs[object_id].loc.y>>8;d->emissive=!object_lit;}
+    else {material=loved_textures[_game_fr_tmap];d->emissive=material==35||material==216;}
+    const HvTile *tile=hv_region_tile(x,y);
+    if(!tile&&object_id>=0){if(!(objs[object_id].loc.y&255))tile=hv_region_tile(x,y-1);if(!tile&&!(objs[object_id].loc.x&255))tile=hv_region_tile(x-1,y);}
+    /* Authored receiver membership prevents influence in adjacent unrelated
+     * rooms. Both lights reach the landing; only amber enters the supply room.
+     * No general visibility/shadow claim. Closed portal leakage is gated below. */
+    d->receivers=tile?(tile->bank==HV_WARM?2:tile->bank==HV_ORIGINAL?3:1):0;
+    /* Door 5 is the runtime supply portal at (26.5,21.9961). Its closed
+     * animation frame blocks amber spill onto the Medical landing. */
+    if(tile&&tile->bank!=HV_WARM&&objs[5].info.current_frame==0)d->receivers&=~2;
+}
+static Draw *new_draw(int n,int texture,int cutout) {
+    if(ndraw>=MAX_DRAWS||nvertex+n>MAX_VERTICES){gpu_world_reject("command capacity");return NULL;}
+    Draw *d=&draws[ndraw++];memset(d,0,sizeof(*d));d->first=nvertex;d->count=n;d->texture=texture;d->cutout=cutout;metadata(d);nvertex+=n;return d;
+}
+static void point_vertex(Vertex *v,g3s_phandle p,int lit) {
+    float z=p->gZ/65536.f;
+    /* Same software projection including fixed-point bias; invert Y for SDL's
+     * render-target texture convention (its texel row zero is framebuffer low Y). */
+    v->clip[0]=(p->sx/65536.f*2/view_w-1)*z;
+    v->clip[1]=(p->sy/65536.f*2/view_h-1)*z;v->clip[2]=0;v->clip[3]=z;
+    world_position(p,v->world);v->uv[0]=p->uv.u/256.f;v->uv[1]=p->uv.v/256.f;
+    v->darkness=lit?p->i/256.f:0;
+    if(gr_get_fill_type()==FILL_CLUT)v->darkness=clut_darkness((const unsigned char*)gr_get_fill_parm());
+}
+void gpu_world_face(int n,g3s_phandle *p,grs_bitmap *bm,int lit) {
+    if(!gpu_world_active())return;
+    if(n<3||n>32){gpu_world_reject("textured polygon count");return;}
+    int tex=texture_index(bm);if(tex<0)return;
+    Draw *d=new_draw((n-2)*3,tex,(bm->flags&BMF_TRANS)!=0);if(!d)return;
+    for(int i=1,k=d->first;i<n-1;i++){point_vertex(&vertices[k++],p[0],lit);point_vertex(&vertices[k++],p[i],lit);point_vertex(&vertices[k++],p[i+1],lit);}
+}
+void gpu_world_polygon(long color,int n,g3s_phandle *p,int gouraud) {
+    if(!gpu_world_active())return;
+    if(gouraud||color<0||color>255){gpu_world_reject("translucent/gouraud polygon");return;}
+    unsigned char index=(unsigned char)color;grs_bitmap bm;memset(&bm,0,sizeof(bm));bm.bits=&index;bm.w=bm.h=bm.row=1;bm.type=BMT_FLAT8;
+    gpu_world_face(n,p,&bm,0);
+}
+void gpu_world_sprite(grs_bitmap *bm,grs_vertex **p,g3s_phandle anchor,const unsigned char *clut) {
+    if(!gpu_world_active())return;
+    int tex=texture_index(bm);if(tex<0)return;
+    Draw *d=new_draw(6,tex,(bm->flags&BMF_TRANS)!=0);if(!d)return;
+    const int order[]={0,1,2,0,2,3};const float uv[4][2]={{0,0},{0.99999f,0},{0.99999f,0.99999f},{0,0.99999f}};
+    for(int i=0;i<6;i++){int j=order[i];Vertex *v=&vertices[d->first+i];v->clip[0]=p[j]->x/65536.f*2/view_w-1;v->clip[1]=p[j]->y/65536.f*2/view_h-1;v->clip[2]=0;v->clip[3]=1;world_position(anchor,v->world);memcpy(v->uv,uv[j],sizeof(v->uv));v->darkness=clut_darkness(clut);}
+}
+void gpu_world_object(int id,int type,int lit) {
+    if(!active)return;object_id=id;object_lit=lit;
+    static unsigned char seen[65536];
+    if(id>=0&&id<65536&&!seen[id]){seen[id]=1;SDL_Log("GPU1B object id=%d representation=%d class=%d frame=%d xyz=%g,%g,%g",id,type,objs[id].obclass,objs[id].info.current_frame,objs[id].loc.x/256.,objs[id].loc.y/256.,objs[id].loc.z/256.);}
+    /* Bitmap, multiview, critter, panels, models and ordinary cube specials
+     * reach common primitive capture. Destination-dependent and voxel paths do not. */
+    if(type==FAUBJ_TL_POLY||type==FAUBJ_VOX||ID2TRIP(id)==INVISO_CRIT_TRIPLE||
+        (type==FAUBJ_SPECIAL && ID2TRIP(id)!=BRIDGE_TRIPLE && ID2TRIP(id)!=PILLAR_TRIPLE &&
+         ID2TRIP(id)!=CATWALK_TRIPLE && ID2TRIP(id)!=SML_CRT_TRIPLE && ID2TRIP(id)!=LG_CRT_TRIPLE &&
+         ID2TRIP(id)!=SECURE_CONTR_TRIPLE && ID2TRIP(id)!=BARRICADE_TRIPLE))gpu_world_reject("unsupported object representation");
+}
+void gpu_world_object_end(void){object_id=-1;object_lit=1;}
+
+int gpu_world_begin(void) {
+    int previous=active;active=0;
+    if(gShockPrefs.doHorrorVisuals!=3)return previous;
+    unsigned excluded=FR_PICKUPM_MASK|FR_HACKCAM_MASK|FR_PALETTE_MASK|FR_NORENDR_MASK|FR_SOLIDFR_MASK|FR_SFX_MASK|FR_OVERLAY_MASK|FR_CURVIEW_MASK;
+    if(previous||(_fr_curflags&excluded)||view360_is_rendering||UseCutscenePalette||curr_clut_table||DoubleSize||
+        player_struct.level!=1||!global_fullmap||global_fullmap->cyber||player_struct.drug_status[DRUG_LSD]||player_struct.drug_status[DRUG_SIGHT]){
+        if(!(_fr_curflags&(FR_PICKUPM_MASK|FR_HACKCAM_MASK))&&!previous)retained=command_valid=0;
+        if(!(_fr_curflags&FR_PICKUPM_MASK))log_fallback("excluded view/effect/detail/level");
+        return previous;
+    }
+    if(!hv_region_tile(fr_camera_last[0]>>16,fr_camera_last[1]>>16)){retained=command_valid=0;log_fallback("camera outside Medical proof");return previous;}
+    for(size_t i=0;i<hv_medical_tile_count;i++){
+        const HvTile *t=&hv_medical_tiles[i];MapElem *m=MAP_GET_XY(t->x,t->y);
+        if(me_tiletype(m)!=t->type||me_height_flr(m)!=t->floor_height||me_height_ceil(m)!=t->ceiling_height||loved_textures[me_tmap_wall(m)]!=t->wall||loved_textures[me_tmap_flr(m)]!=t->floor||loved_textures[me_tmap_ceil(m)]!=t->ceiling){retained=command_valid=0;log_fallback("Medical geometry signature");return previous;}
+    }
+    active=1;failed=0;failure=NULL;retained=command_valid=0;ndraw=nvertex=0;object_id=-1;++frame;
+    uploads=upload_bytes=0;capture_start=SDL_GetPerformanceCounter();
+    view_w=_fr->draw_canvas.bm.w;view_h=_fr->draw_canvas.bm.h;
+    destination.x=full_game_3d?0:SCONV_X(28);destination.y=full_game_3d?0:SCONV_Y(24);destination.w=view_w;destination.h=view_h;
+    /* Invert the exact primary camera transform once, before object instancing.
+     * view_matrix is column-major relative to do_rotate's dot products. */
+    const fix *m=(const fix*)&view_matrix;float a[9];for(int r=0;r<3;r++)for(int c=0;c<3;c++)a[r*3+c]=m[c*3+r]/65536.f;
+    float det=a[0]*(a[4]*a[8]-a[5]*a[7])-a[1]*(a[3]*a[8]-a[5]*a[6])+a[2]*(a[3]*a[7]-a[4]*a[6]);
+    if(fabsf(det)<1e-8f){gpu_world_reject("singular camera matrix");return previous;}
+    inverse[0]=(a[4]*a[8]-a[5]*a[7])/det;inverse[1]=(a[2]*a[7]-a[1]*a[8])/det;inverse[2]=(a[1]*a[5]-a[2]*a[4])/det;
+    inverse[3]=(a[5]*a[6]-a[3]*a[8])/det;inverse[4]=(a[0]*a[8]-a[2]*a[6])/det;inverse[5]=(a[2]*a[3]-a[0]*a[5])/det;
+    inverse[6]=(a[3]*a[7]-a[4]*a[6])/det;inverse[7]=(a[1]*a[6]-a[0]*a[7])/det;inverse[8]=(a[0]*a[4]-a[1]*a[3])/det;
+    eye[0]=_view_position.gX/65536.f;eye[1]=_view_position.gY/65536.f;eye[2]=_view_position.gZ/65536.f;
+    for(int j=0;j<2;j++){
+        const Light *l=&medical_lights[j];MapElem *tile=MAP_GET_XY(l->tile_x,l->tile_y);
+        light_pos[j*4]=l->x;light_pos[j*4+1]=l->y;
+        light_pos[j*4+2]=_fr_fhgt_list[32-me_height_ceil(tile)]/65536.f-l->ceiling_offset;light_pos[j*4+3]=l->radius;
+        memcpy(light_color+j*4,l->rgb,3*sizeof(float));light_color[j*4+3]=l->intensity;
+    }
+    return previous;
+}
+static void sampling(void){glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_NEAREST);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_NEAREST);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);}
+static int submit(void) {
+    SDL_GLContext now=SDL_GL_GetCurrentContext();
+    if(ready&&(context!=now||gpu_w!=view_w||gpu_h!=view_h))resources_dispose(context!=now);
+    if(!ready&&!initialize()){resources_dispose(0);disabled=1;gShockPrefs.doHorrorVisuals=0;return 0;}
+    SDL_Texture *old=SDL_GetRenderTarget(renderer);if(SDL_SetRenderTarget(renderer,world)<0)return 0;
+    Bridge state;bridge_save(&state);
+    glDisable(GL_BLEND);glDisable(GL_DEPTH_TEST);glDisable(GL_STENCIL_TEST);glDisable(GL_SCISSOR_TEST);glDisable(GL_CULL_FACE);
+    glColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE);glDepthMask(GL_FALSE);glViewport(0,0,view_w,view_h);
+    glClearColor(0,0,0,1);glClear(GL_COLOR_BUFFER_BIT);glUseProgram(program);glBindVertexArray(vao);glBindBuffer(GL_ARRAY_BUFFER,vbo);
+    glBufferData(GL_ARRAY_BUFFER,nvertex*sizeof(Vertex),vertices,GL_STREAM_DRAW);
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER,0);glPixelStorei(GL_UNPACK_ALIGNMENT,1);glPixelStorei(GL_UNPACK_ROW_LENGTH,0);glPixelStorei(GL_UNPACK_SKIP_ROWS,0);glPixelStorei(GL_UNPACK_SKIP_PIXELS,0);
+    glActiveTexture(GL_TEXTURE1);glBindTexture(GL_TEXTURE_2D,palette);sampling();
+    if(uploaded_palette!=palette_generation){glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA8,256,1,0,GL_RGBA,GL_UNSIGNED_BYTE,palette_rgb);uploaded_palette=palette_generation;}
+    glUniform1i(glGetUniformLocation(program,"indices"),0);glUniform1i(glGetUniformLocation(program,"pal"),1);
+    glUniform4fv(glGetUniformLocation(program,"lights"),2,light_pos);glUniform4fv(glGetUniformLocation(program,"colors"),2,light_color);
+    glUniform3fv(glGetUniformLocation(program,"ambient"),1,medical_ambient);
+    float g=fmaxf(.1f,fminf(1.f,gShockPrefs.doGamma/100.f)),exponent=1.f/((1-(1-g)*(1-g))*2.2f);
+    glUniform1f(glGetUniformLocation(program,"gammaExponent"),exponent);
+    GLint cut=glGetUniformLocation(program,"cutout"),em=glGetUniformLocation(program,"emissive"),rec=glGetUniformLocation(program,"receivers");
+    glActiveTexture(GL_TEXTURE0);
+    for(int i=0;i<ndraw;i++){
+        Draw *d=&draws[i];Texture *t=&textures[d->texture];
+        if(!t->gl){glGenTextures(1,&t->gl);glBindTexture(GL_TEXTURE_2D,t->gl);sampling();glTexImage2D(GL_TEXTURE_2D,0,GL_R8UI,t->w,t->h,0,GL_RED_INTEGER,GL_UNSIGNED_BYTE,t->pixels);++uploads;upload_bytes+=t->w*t->h;}
+        else glBindTexture(GL_TEXTURE_2D,t->gl);
+        glUniform1i(cut,d->cutout);glUniform1i(em,d->emissive);glUniform1i(rec,d->receivers);glDrawArrays(GL_TRIANGLES,d->first,d->count);
+    }
+    GLenum error=glGetError();bridge_restore(&state);SDL_SetRenderTarget(renderer,old);
+    if(error){SDL_Log("GPU1B submit GL error=%x",error);return 0;}return 1;
+}
+void gpu_world_end(int previous) {
+    if(active){
+        uint64_t capture_end=SDL_GetPerformanceCounter();
+        size_t size=(size_t)view_w*view_h;
+        if(!failed&&software_capacity<size){unsigned char *p=realloc(software_world,size);if(!p)gpu_world_reject("software fallback allocation");else {software_world=p;software_capacity=size;}}
+        if(!failed&&!submit()){failed=1;if(!failure)failure="GPU submission failure";}
+        if(failed){retained=0;log_fallback(failure?failure:"unknown");}
+        else {
+            retained=command_valid=1;
+            for(int y=0;y<view_h;y++)memcpy(software_world+y*view_w,_fr->draw_canvas.bm.bits+y*_fr->draw_canvas.bm.row,view_w);
+            /* Explicit world/UI boundary: discard completed software world only
+             * after successful submission. Overlays are subsequently drawn by the
+             * unmodified fr_send_view callback/copy pipeline. */
+            for(int y=0;y<_fr->draw_canvas.bm.h;y++)memset(_fr->draw_canvas.bm.bits+y*_fr->draw_canvas.bm.row,255,_fr->draw_canvas.bm.w);
+            if(frame==1||frame%300==0){double ms=1000./SDL_GetPerformanceFrequency();SDL_Log("GPU1B LIVE frame=%u draws=%d triangles=%d capture_with_software_ms=%.3f submit_cpu_ms=%.3f uploads=%u bytes=%u palette_generation=%u fallbacks=%u GPU_execution_ms=unknown lights_z=%g,%g viewport=%d,%d,%d,%d",frame,ndraw,nvertex/3,(capture_end-capture_start)*ms,(SDL_GetPerformanceCounter()-capture_end)*ms,uploads,upload_bytes,palette_generation,fallbacks,light_pos[2],light_pos[6],destination.x,destination.y,destination.w,destination.h);}
+        }
+    }
+    active=previous;
+}
+void gpu_world_palette(int index,int count,const unsigned char *rgb) {
+    for(int i=index;i<index+count&&i<256;i++){memcpy(palette_rgb+i*4,rgb,3);palette_rgb[i*4+3]=255;rgb+=3;}++palette_generation;
+}
+void gpu_world_mode_changed(void){
+    retained=command_valid=0;disabled=0;
+    if(ready&&(inject("es3")||inject("shader")||inject("fbo")))resources_dispose(0);
+    if(ready&&inject("reset")){
+        resources_dispose(0);
+        SDL_Log("GPU1B QA controlled resource reset: deleted all GL resources; CPU metadata retained");
+    }
+}
+void gpu_world_event(const SDL_Event *e) {
+    if(e->type==SDL_RENDER_DEVICE_RESET){resources_dispose(1);disabled=0;SDL_Log("GPU1B device-reset: rebuild all GPU resources from CPU metadata");}
+    if(e->type==SDL_RENDER_TARGETS_RESET){retained=0;SDL_Log("GPU1B target-reset: invalidate retained world");}
+    if(e->type==SDL_APP_DIDENTERFOREGROUND){retained=0;SDL_Log("GPU1B foreground: require fresh primary view");}
+}
+int gpu_world_compose(void) {
+    if(gShockPrefs.doHorrorVisuals!=3||!command_valid||UseCutscenePalette||(_current_loop!=GAME_LOOP&&_current_loop!=FULLSCREEN_LOOP))return 0;
+    /* Retained commands include owned pixels and copied vertices: rebuild a
+     * paused view after reset/foreground without re-running simulation/traversal.
+     * Palette cycling can update that same view without re-uploading indexed art. */
+    if(!retained||!ready||context!=SDL_GL_GetCurrentContext()||uploaded_palette!=palette_generation){
+        if(!submit()){
+            log_fallback("retained view restoration failure");
+            /* The world-only software backup is complete. Restore its coverage
+             * below the unchanged software UI, never paste individual objects. */
+            for(int y=0;y<view_h;y++)for(int x=0;x<view_w;x++){
+                int sx=destination.x+x,sy=destination.y+y;
+                if(sx>=0&&sy>=0&&sx<drawSurface->w&&sy<drawSurface->h){unsigned char *p=(unsigned char*)drawSurface->pixels+sy*drawSurface->pitch+sx;if(*p==255)*p=software_world[y*view_w+x];}
+            }
+            retained=command_valid=0;gShockPrefs.doHorrorVisuals=0;return 0;
+        }
+        retained=1;
+    }
+    SDL_RenderCopy(renderer,world,NULL,&destination);return 1;
+}

@@ -1,3 +1,4 @@
+#include "GpuWorld.h"
 /*
 
 Copyright (C) 2015-2018 Night Dive Studios, LLC.
@@ -1845,6 +1846,30 @@ void gamma_slider_dealfunc(ushort gamma_qvar) {
     uiShowMouse(NULL);
 }
 
+/* Normal video options widget: presentation preference, no quest/save variable. */
+extern void horror_visuals_set_mode(int mode);
+static void visuals_button_draw(uchar butid) {
+    char label[48];
+    strcpy(label,gShockPrefs.doHorrorVisuals==3 ? "GPU\nPROTOTYPE" : gShockPrefs.doHorrorVisuals==2 ? "VIS1B\nHORROR" :
+                 gShockPrefs.doHorrorVisuals==1 ? "VIS1\nCONSERVATIVE" : "VISUALS\nORIGINAL");
+    text_button(label,BR(butid).ul.x,BR(butid).ul.y,BUTTON_COLOR,BUTTON_SHADOW,
+                BR(butid).ul.x-BR(butid).lr.x,BR(butid).ul.y-BR(butid).lr.y);
+}
+static void visuals_button_toggle(uchar butid) {
+    (void)butid;
+    #ifdef RP5NP_GPU_WORLD
+    horror_visuals_set_mode((gShockPrefs.doHorrorVisuals+1)%4);
+#else
+    horror_visuals_set_mode((gShockPrefs.doHorrorVisuals+1)%3);
+#endif
+    /* Like gamma: a fresh world draw while the options panel remains open.
+     * Corner intensities are recomputed each draw; no level reload is needed. */
+    uiHideMouse(NULL);
+    render_run();
+    opanel_redraw(TRUE);
+    uiShowMouse(NULL);
+}
+
 void video_screen_init(void) {
     LGRect r;
     int i;
@@ -1910,6 +1935,14 @@ void video_screen_init(void) {
         i++;
     }
 #endif
+
+    if (i<5) {
+        standard_button_rect(&r,i,2,2,2);
+        r.lr.x+=42; /* Bottom-center slot is unused: fit VIS1 CONSERVATIVE. */
+        pushbutton_init(i,'h',ID_NULL,visuals_button_toggle,&r);
+        OButtons[i].drawfunc=visuals_button_draw;
+        i++;
+    }
 
     // return (fixed at position 5)
     standard_button_rect(&r, 5, 2, 2, 2);
