@@ -71,10 +71,11 @@ GPU-RENDER2 commit: bcc842c4bd38a95b5fd4ff6dc8e6598ec854ef84
  13 renderer/report/helper files only; unrelated AUDIO work remains unstaged.
 GPU-RENDER3 commit: 463e5f1d9a293012674dbe5aa305dc121b402e32
   Support concave ordinary models and accept bounded GPU object parity
-GPU-RENDER4 commit: pending focused commit after the PASS recorded below.
+GPU-RENDER4 commit: b19e5bbd4079158fa1f71acf4513f9198b3897dd
   Preserve indexed menus and validate GPU special-view transitions
-No push has been performed or authorized. The exact Phase4 hash will be added
-in a documentation-only provenance commit after creating that phase commit.
+  Four renderer/report files only; unrelated AUDIO work remains unstaged.
+This documentation-only follow-up records the exact Phase4 commit hash; it
+changes no source or APK. No push has been performed or authorized.
 
 Historical Phase2 renderer manifest (already committed):
   AndroidProject/app/jni/CMakeLists.txt
