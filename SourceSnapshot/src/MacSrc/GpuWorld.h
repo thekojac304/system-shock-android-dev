@@ -17,6 +17,8 @@ void gpu_world_palette(int index, int count, const unsigned char *rgb);
 void gpu_world_event(const SDL_Event *event);
 int gpu_world_compose(void);
 void gpu_world_mode_changed(void);
+/* Presenter owns SDL texture retirement on a replaced context. No GL calls. */
+void gpu_world_presenter_lost(void);
 #else
 #define gpu_world_begin() 0
 #define gpu_world_end(previous) ((void)(previous))
@@ -31,5 +33,6 @@ void gpu_world_mode_changed(void);
 #define gpu_world_event(e) ((void)0)
 #define gpu_world_compose() 0
 #define gpu_world_mode_changed() ((void)0)
+#define gpu_world_presenter_lost() ((void)0)
 #endif
 #endif

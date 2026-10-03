@@ -1,7 +1,9 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
- * GPU-RENDER1B: bounded, ordered Medical proof. Software capture runs once and
+ * Optional ordered GLES world backend. Software capture runs once and
  * remains authoritative until the entire GPU view has succeeded. No readback. */
 #include "GpuWorld.h"
+#include "GpuTextureCache.h"
+#include "GpuGeometry.h"
 #include "GlobalV.h"
 #include "Prefs.h"
 #include "Shock.h"
@@ -31,15 +33,13 @@ extern bool UseCutscenePalette, DoubleSize;
 extern uchar full_game_3d;
 extern char curr_clut_table;
 extern uchar view360_is_rendering;
+extern uchar view360_render_on;
 extern int _game_fr_tmap;
+extern int secret_render_fx;
 
-enum { MAX_DRAWS=4096, MAX_VERTICES=32768, MAX_TEXTURES=512 };
+enum { MAX_DRAWS=4096, MAX_VERTICES=32768, MAX_TEXTURES=GW_CACHE_MAX_SLOTS };
 typedef struct { float clip[4], world[3], uv[2], darkness; } Vertex;
 typedef struct { int first, count, texture, cutout, emissive, receivers; } Draw;
-/* Content-addressed resource identity: hash + dimensions + byte equality. CPU
- * pixels are owned, including decoded RSD and temporary monitor/model sources.
- * No bitmap address survives capture. GL names are disposable derived state. */
-typedef struct { uint64_t hash; int w,h; unsigned char *pixels; GLuint gl; unsigned used; } Texture;
 typedef struct { float x,y,ceiling_offset,radius,rgb[3],intensity; int tile_x,tile_y; } Light;
 static const Light medical_lights[2] = {
     {30.0f,23.8f,0.35f,4.2f,{0.13f,0.8f,1.0f},2.4f,30,23},
@@ -48,8 +48,12 @@ static const Light medical_lights[2] = {
 static const float medical_ambient[3]={0.065f,0.075f,0.085f};
 static Vertex vertices[MAX_VERTICES];
 static Draw draws[MAX_DRAWS];
-static Texture textures[MAX_TEXTURES];
+static GwTextureCache texture_cache;
+static GLuint texture_gl[MAX_TEXTURES];
+static unsigned char texture_retired[MAX_TEXTURES];
+static int cache_initialized;
 static int active, failed, object_id=-1, object_lit=1, ndraw, nvertex, ready, disabled;
+static int medical_profile;
 static unsigned frame, fallbacks, uploads, upload_bytes;
 static int retained, command_valid, view_w,view_h, gpu_w,gpu_h;
 static unsigned char *software_world;
@@ -63,6 +67,103 @@ static unsigned palette_generation=1, uploaded_palette;
 static float inverse[9],eye[3],light_pos[8],light_color[8];
 static uint64_t capture_start;
 static const char *failure;
+static double capture_samples[300],submit_samples[300];
+static unsigned timing_samples;
+static uint64_t terrain_types;
+static int diagnostic_due=1,logged_level=-1;
+#ifdef RP5NP_QA_TOOLS
+/* Flight's original four-frame terrain family only. This observes the existing
+ * selected bitmap/cache entry; it never advances animation, reads pixels back,
+ * changes resources, or treats palette changes as texture-frame transitions.
+ * A mode selection starts a new bounded probe; a level change/save-time rewind
+ * also rearms it. Captured metadata follows retained commands through replay. */
+typedef struct {
+    int valid,level,x,y,base_slot,group,group_frame,selected_slot,selected_master;
+    int texture,width,height,draw_index,bounds[4];
+    unsigned capture_frame;
+    uint32_t game_time;
+    uint64_t hash;
+} QaAnimationSample;
+static QaAnimationSample qa_animation_pending,qa_animation_last;
+static int qa_animation_level=-1;
+static unsigned qa_animation_reports;
+static uint32_t qa_animation_time;
+static void qa_animation_reset(void) {
+    memset(&qa_animation_pending,0,sizeof(qa_animation_pending));
+    memset(&qa_animation_last,0,sizeof(qa_animation_last));
+    qa_animation_level=player_struct.level;
+    qa_animation_time=player_struct.game_time;
+    qa_animation_reports=0;
+}
+static void qa_animation_begin(void) {
+    if(qa_animation_level!=player_struct.level||player_struct.game_time<qa_animation_time)
+        qa_animation_reset();
+    qa_animation_time=player_struct.game_time;
+    qa_animation_pending.valid=0;
+}
+static void qa_animation_capture(int texture,int n,const int32_t (*xy)[2]) {
+    if(qa_animation_reports>=16||qa_animation_pending.valid||object_id>=0||
+       player_struct.level!=5||_game_fr_tmap<0||_game_fr_tmap>=NUM_LOADED_TEXTURES||
+       loved_textures[_game_fr_tmap]!=237)return;
+    int group=textprops[_game_fr_tmap].anim_group;
+    if(group<=0||group>=NUM_ANIM_TEXTURE_GROUPS||textprops[_game_fr_tmap].group_pos!=0||
+       animtextures[group].num_frames!=4)return;
+    int phase=ANIMTEXT_FRAME(_game_fr_tmap),selected=_game_fr_tmap+phase;
+    if(phase<0||phase>=4||selected<0||selected>=NUM_LOADED_TEXTURES)return;
+    const GwTextureEntry *entry=&texture_cache.entries[texture];
+    /* Flat-color terrain also reaches gpu_world_face with a 1x1 index bitmap. */
+    if(entry->w<=1||entry->h<=1)return;
+    QaAnimationSample *sample=&qa_animation_pending;
+    sample->valid=1;sample->level=player_struct.level;sample->x=_fdt_x;sample->y=_fdt_y;
+    sample->base_slot=_game_fr_tmap;sample->group=group;
+    sample->group_frame=animtextures[group].current_frame;
+    sample->selected_slot=selected;sample->selected_master=loved_textures[selected];
+    sample->texture=texture;sample->width=entry->w;sample->height=entry->h;
+    sample->hash=entry->hash;sample->draw_index=ndraw-1;
+    sample->capture_frame=frame;sample->game_time=player_struct.game_time;
+    sample->bounds[0]=sample->bounds[2]=xy[0][0];
+    sample->bounds[1]=sample->bounds[3]=xy[0][1];
+    for(int i=1;i<n;i++){
+        if(xy[i][0]<sample->bounds[0])sample->bounds[0]=xy[i][0];
+        if(xy[i][1]<sample->bounds[1])sample->bounds[1]=xy[i][1];
+        if(xy[i][0]>sample->bounds[2])sample->bounds[2]=xy[i][0];
+        if(xy[i][1]>sample->bounds[3])sample->bounds[3]=xy[i][1];
+    }
+}
+static void qa_animation_composed(void) {
+    const QaAnimationSample *sample=&qa_animation_pending,*last=&qa_animation_last;
+    if(!sample->valid||qa_animation_reports>=16)return;
+    /* Palette generation deliberately does not participate in this comparison. */
+    if(last->valid&&sample->group_frame==last->group_frame&&
+       sample->selected_slot==last->selected_slot&&sample->selected_master==last->selected_master&&
+       sample->width==last->width&&sample->height==last->height&&sample->hash==last->hash)return;
+    SDL_Log("GPU2 ANIM composed=1 sample=%u/16 frame=%u game_time=%u level=%d terrain_tile=%d,%d base_slot=%d base_master=237 group=%d group_frame=%d frames=4 selected_slot=%d selected_master=%d cache_slot=%d size=%dx%d index_hash=%016llx palette_generation=%u draw=%d bounds_px=%.6f,%.6f,%.6f,%.6f",
+        ++qa_animation_reports,sample->capture_frame,(unsigned)sample->game_time,sample->level,
+        sample->x,sample->y,sample->base_slot,sample->group,sample->group_frame,
+        sample->selected_slot,sample->selected_master,sample->texture,sample->width,sample->height,
+        (unsigned long long)sample->hash,palette_generation,sample->draw_index,
+        sample->bounds[0]/65536.,sample->bounds[1]/65536.,sample->bounds[2]/65536.,sample->bounds[3]/65536.);
+    qa_animation_last=*sample;
+}
+#else
+#define qa_animation_begin() ((void)0)
+#define qa_animation_capture(texture,n,xy) ((void)0)
+#define qa_animation_composed() ((void)0)
+#define qa_animation_reset() ((void)0)
+#endif
+static int compare_sample(const void *a,const void *b) {
+    double x=*(const double*)a,y=*(const double*)b;return (x>y)-(x<y);
+}
+static void measure_view(uint64_t begin,uint64_t captured,uint64_t submitted) {
+    double scale=1000./SDL_GetPerformanceFrequency();
+    capture_samples[timing_samples]=(captured-begin)*scale;
+    submit_samples[timing_samples]=(submitted-captured)*scale;
+    if(++timing_samples<300)return;
+    double cap=0,sub=0;for(int i=0;i<300;i++){cap+=capture_samples[i];sub+=submit_samples[i];}
+    qsort(capture_samples,300,sizeof(double),compare_sample);qsort(submit_samples,300,sizeof(double),compare_sample);
+    SDL_Log("GPU2 TIMING samples=300 capture_software_mean_ms=%.3f p95=%.3f p99=%.3f submit_cpu_mean_ms=%.3f p95=%.3f p99=%.3f GPU_execution_ms=unknown",cap/300,capture_samples[284],capture_samples[296],sub/300,submit_samples[284],submit_samples[296]);
+    timing_samples=0;
+}
 
 /* Only state actually changed by this pass is saved. Vertex attributes and
  * EBO live in our private VAO; SDL's VAO/attribute pointers are never edited. */
@@ -121,7 +222,7 @@ static const char *fs =
     "vec3 encoded=texelFetch(pal,ivec2(int(idx),0),0).rgb;"
     "vec3 base=pow(encoded,vec3(2.2));"
     "float s=pow(clamp(1.0-D/16.0,0.0,1.0),2.0);"
-    "vec3 illumination=ambient*s;"
+    "vec3 illumination=(receivers!=0?ambient:vec3(1.0))*s;"
     "for(int j=0;j<2;j++){if((receivers&(1<<j))!=0){"
     "float a=max(0.0,1.0-distance(W,lights[j].xyz)/lights[j].w);"
     "illumination+=colors[j].rgb*colors[j].a*a*a;}}"
@@ -139,7 +240,7 @@ void gpu_world_reject(const char *reason) {
 int gpu_world_active(void){return active&&!failed;}
 static void log_fallback(const char *reason) {
     static char last[160];++fallbacks;
-    if(strcmp(last,reason)||fallbacks%300==0){SDL_Log("GPU1B whole-view SOFTWARE reason=%s count=%u",reason,fallbacks);snprintf(last,sizeof(last),"%s",reason);}
+    if(strcmp(last,reason)||fallbacks%300==0){SDL_Log("GPU1B whole-view SOFTWARE reason=%s count=%u level=%d flags=%08x camera=%g,%g",reason,fallbacks,player_struct.level,_fr_curflags,fr_camera_last[0]/65536.,fr_camera_last[1]/65536.);snprintf(last,sizeof(last),"%s",reason);}
 }
 static GLuint shader(GLenum type,const char *source) {
     GLuint id=glCreateShader(type);glShaderSource(id,1,&source,NULL);glCompileShader(id);
@@ -147,14 +248,14 @@ static GLuint shader(GLenum type,const char *source) {
     SDL_Log("GPU1B shader type=%x compile=%d log=%s",type,ok,log);
     if(!ok){glDeleteShader(id);return 0;}return id;
 }
-/* Called only on the render thread. On real device reset names are forgotten,
- * never deleted in the replacement context. On same-context resize dispose. */
+/* Called only on the render thread. Lost SDL textures remain on their old
+ * renderer's ownership list; the presenter retires that entire owner safely. */
 static void resources_dispose(int lost) {
     retained=ready=0;
     if(!lost){if(program)glDeleteProgram(program);glDeleteVertexArrays(1,&vao);glDeleteBuffers(1,&vbo);glDeleteTextures(1,&palette);glDeleteRenderbuffers(1,&depth);}
     program=vao=vbo=palette=depth=0;
-    for(int i=0;i<MAX_TEXTURES;i++){if(!lost)glDeleteTextures(1,&textures[i].gl);textures[i].gl=0;}
-    if(world)SDL_DestroyTexture(world);world=NULL;uploaded_palette=0;
+    for(int i=0;i<MAX_TEXTURES;i++){if(!lost)glDeleteTextures(1,&texture_gl[i]);texture_gl[i]=0;texture_retired[i]=0;}
+    if(world&&!lost)SDL_DestroyTexture(world);world=NULL;uploaded_palette=0;
 }
 static int initialize(void) {
     if(disabled){failure="GPU initialization disabled until mode retry";return 0;}
@@ -200,24 +301,19 @@ static int initialize(void) {
     if(complete!=GL_FRAMEBUFFER_COMPLETE||err){failure="incomplete framebuffer or allocation GL error";return 0;}
     ready=1;gpu_w=view_w;gpu_h=view_h;context=SDL_GL_GetCurrentContext();return 1;
 }
+static void retire_texture(void *unused,int slot) {
+    (void)unused;
+    /* Capture never issues native GL commands behind SDL's state cache. Names
+     * are deleted in the next guarded submission, before any new allocation. */
+    texture_retired[slot]=1;
+}
 static int texture_index(grs_bitmap *source) {
     grs_bitmap decoded,*bm=source;
     if(bm->type==BMT_RSD8){if(gr_rsd8_convert(bm,&decoded)!=GR_UNPACK_RSD8_OK){gpu_world_reject("RSD decode");return -1;}bm=&decoded;}
     if(bm->type!=BMT_FLAT8||(bm->flags&BMF_TLUC8)||bm->w<=0||bm->h<=0||bm->w>1024||bm->h>1024||bm->row<bm->w){gpu_world_reject("bitmap format/translucency/dimensions");return -1;}
-    uint64_t hash=UINT64_C(1469598103934665603);
-    for(int y=0;y<bm->h;y++)for(int x=0;x<bm->w;x++){hash^=bm->bits[y*bm->row+x];hash*=UINT64_C(1099511628211);}
-    int free_slot=-1;
-    for(int i=0;i<MAX_TEXTURES;i++){
-        Texture *t=&textures[i];if(!t->pixels){if(free_slot<0)free_slot=i;continue;}
-        if(t->hash!=hash||t->w!=bm->w||t->h!=bm->h)continue;
-        int same=1;for(int y=0;y<bm->h;y++)if(memcmp(t->pixels+y*bm->w,bm->bits+y*bm->row,bm->w)){same=0;break;}
-        if(same){t->used=frame;return i;}
-    }
-    if(free_slot<0){gpu_world_reject("texture cache capacity");return -1;}
-    Texture *t=&textures[free_slot];t->pixels=malloc(bm->w*bm->h);
-    if(!t->pixels){gpu_world_reject("texture CPU allocation");return -1;}
-    for(int y=0;y<bm->h;y++)memcpy(t->pixels+y*bm->w,bm->bits+y*bm->row,bm->w);
-    t->hash=hash;t->w=bm->w;t->h=bm->h;t->used=frame;return free_slot;
+    int slot=gw_cache_acquire(&texture_cache,bm->bits,bm->w,bm->h,bm->row);
+    if(slot<0)gpu_world_reject(slot==GW_CACHE_CAPACITY?"texture current-view working set exceeds budget":slot==GW_CACHE_ALLOC?"texture CPU allocation":"invalid indexed texture");
+    return slot;
 }
 static void world_position(const g3s_point *p,float *out) {
     float v[]={p->gX/65536.f,p->gY/65536.f,p->gZ/65536.f},w[3];
@@ -233,9 +329,10 @@ static float clut_darkness(const unsigned char *clut) {
 static void metadata(Draw *d) {
     int x=_fdt_x,y=_fdt_y,material=-1;
     if(object_id>=0){x=objs[object_id].loc.x>>8;y=objs[object_id].loc.y>>8;d->emissive=!object_lit;}
-    else {material=loved_textures[_game_fr_tmap];d->emissive=material==35||material==216;}
-    const HvTile *tile=hv_region_tile(x,y);
-    if(!tile&&object_id>=0){if(!(objs[object_id].loc.y&255))tile=hv_region_tile(x,y-1);if(!tile&&!(objs[object_id].loc.x&255))tile=hv_region_tile(x-1,y);}
+    else {material=loved_textures[_game_fr_tmap];d->emissive=material==35||material==216;
+        unsigned type=me_tiletype(MAP_GET_XY(x,y));if(type<64)terrain_types|=UINT64_C(1)<<type;}
+    const HvTile *tile=medical_profile?hv_region_tile(x,y):NULL;
+    if(medical_profile&&!tile&&object_id>=0){if(!(objs[object_id].loc.y&255))tile=hv_region_tile(x,y-1);if(!tile&&!(objs[object_id].loc.x&255))tile=hv_region_tile(x-1,y);}
     /* Authored receiver membership prevents influence in adjacent unrelated
      * rooms. Both lights reach the landing; only amber enters the supply room.
      * No general visibility/shadow claim. Closed portal leakage is gated below. */
@@ -254,16 +351,103 @@ static void point_vertex(Vertex *v,g3s_phandle p,int lit) {
      * render-target texture convention (its texel row zero is framebuffer low Y). */
     v->clip[0]=(p->sx/65536.f*2/view_w-1)*z;
     v->clip[1]=(p->sy/65536.f*2/view_h-1)*z;v->clip[2]=0;v->clip[3]=z;
-    world_position(p,v->world);v->uv[0]=p->uv.u/256.f;v->uv[1]=p->uv.v/256.f;
+    world_position(p,v->world);
+    /* Match draw_tmap_common's one-unit inward UV bias before texel scaling. */
+    v->uv[0]=(p->uv.u+(p->uv.u<=0?1:-1))/256.f;
+    v->uv[1]=(p->uv.v+(p->uv.v<=0?1:-1))/256.f;
     v->darkness=lit?p->i/256.f:0;
     if(gr_get_fill_type()==FILL_CLUT)v->darkness=clut_darkness((const unsigned char*)gr_get_fill_parm());
+}
+static void log_polygon_topology(int n,g3s_phandle *p,const int32_t (*xy)[2]) {
+    static unsigned reports;
+    if(reports>=12)return;
+    unsigned report=++reports;
+    int winding=0,edge=-1,vertex=-1;
+    double failed_cross=0,failed_tolerance=0,distance_pixels=0;
+    /* Diagnostic replay only, after the production helper has rejected. Keep
+     * its decision/tolerance unchanged while gathering exact device fixtures. */
+    for(int i=0;i<n&&edge<0;i++){
+        int next=(i+1)%n;
+        double dx=(double)xy[next][0]-(double)xy[i][0];
+        double dy=(double)xy[next][1]-(double)xy[i][1];
+        double tolerance=2.0*(fabs(dx)+fabs(dy));
+        for(int j=0;j<n;j++){
+            double px=(double)xy[j][0]-(double)xy[i][0];
+            double py=(double)xy[j][1]-(double)xy[i][1];
+            double cross=dx*py-dy*px;
+            int sign=(cross>tolerance)-(cross<-tolerance);
+            if(sign&&winding&&sign!=winding){
+                edge=i;vertex=j;failed_cross=cross;failed_tolerance=tolerance;
+                distance_pixels=cross/(65536.0*hypot(dx,dy));
+                break;
+            }
+            if(sign)winding=sign;
+        }
+    }
+    SDL_Log("GPU2 topology rejection report=%u frame=%u level=%d object=%d tile=%d,%d texture_slot=%d vertices=%d viewport=%dx%d camera=%.9g,%.9g,%.9g edge=%d vertex=%d expected_winding=%d cross=%.17g tolerance=%.17g distance_pixels=%.9g",
+        report,frame,player_struct.level,object_id,_fdt_x,_fdt_y,_game_fr_tmap,n,view_w,view_h,
+        fr_camera_last[0]/65536.,fr_camera_last[1]/65536.,fr_camera_last[2]/65536.,
+        edge,vertex,winding,failed_cross,failed_tolerance,distance_pixels);
+    for(int i=0;i<n;i++)
+        SDL_Log("GPU2 topology vertex report=%u i=%d raw_xy=%d,%d gpu_xy=%d,%d raw_xyz=%d,%d,%d flags=0x%x codes=0x%x",
+            report,i,(int)p[i]->sx,(int)p[i]->sy,(int)xy[i][0],(int)xy[i][1],(int)p[i]->gX,(int)p[i]->gY,(int)p[i]->gZ,
+            (unsigned)p[i]->p3_flags,(unsigned)p[i]->codes);
 }
 void gpu_world_face(int n,g3s_phandle *p,grs_bitmap *bm,int lit) {
     if(!gpu_world_active())return;
     if(n<3||n>32){gpu_world_reject("textured polygon count");return;}
+    /* Terrain emits convex triangles/quads. Model lists are not assumed convex;
+     * reject a non-convex projected boundary before fan triangulation. */
+    int32_t xy[32][2],xyz[32][3];
+    unsigned char clipped[32];
+    for(int i=0;i<n;i++){
+        if(p[i]->gZ<=0){gpu_world_reject("unclipped near-plane vertex");return;}
+        /* Ordinary projection sets this only after both coordinates succeed;
+         * clip intersections also set it before their final screen projection.
+         * Bit 16 in codes is ambiguous: overflow for ordinary vertices, but
+         * the clipper's deliberate CC_OFF_X marker for PF_CLIPPNT vertices. */
+        if(!(p[i]->p3_flags&PF_PROJECTED)){
+            static unsigned projection_reports;
+            if(projection_reports<12){
+                ++projection_reports;
+                SDL_Log("GPU2 projection rejection frame=%u object=%d tile=%d,%d vertex=%d viewport=%dx%d raw_xyz=%d,%d,%d flags=0x%x codes=0x%x",
+                    frame,object_id,_fdt_x,_fdt_y,i,view_w,view_h,(int)p[i]->gX,(int)p[i]->gY,(int)p[i]->gZ,
+                    (unsigned)p[i]->p3_flags,(unsigned)p[i]->codes);
+            }
+            gpu_world_reject("unprojected/overflow polygon vertex");return;
+        }
+        xy[i][0]=p[i]->sx;xy[i][1]=p[i]->sy;
+        xyz[i][0]=p[i]->gX;xyz[i][1]=p[i]->gY;xyz[i][2]=p[i]->gZ;
+        clipped[i]=(p[i]->p3_flags&PF_CLIPPNT)!=0;
+    }
+    int canonicalized=gw_polygon_canonicalize_clipped_positions(n,xyz,clipped,view_w,view_h,xy);
+    if(canonicalized<0){gpu_world_reject("invalid polygon projection viewport");return;}
+    if(!gw_polygon_is_convex(n,xy)){
+        log_polygon_topology(n,p,xy);
+        gpu_world_reject("non-convex polygon topology");return;
+    }
+    /* Build6's measured boundary fixture emitted equal xyz with sx separated
+     * by 387 raw units through the two projection formulas. Canonicalize only
+     * GPU-local copies; retain each UV/light value and every source vertex. */
+    g3s_point captured_points[32];g3s_phandle captured[32];
+    if(canonicalized){
+        static unsigned canonical_reports;
+        int report=canonical_reports<12;if(report)++canonical_reports;
+        for(int i=0;i<n;i++){
+            captured[i]=p[i];
+            if(xy[i][0]==p[i]->sx&&xy[i][1]==p[i]->sy)continue;
+            if(report)SDL_Log("GPU2 projection canonicalized frame=%u level=%d object=%d tile=%d,%d vertex=%d viewport=%dx%d raw_xy=%d,%d gpu_xy=%d,%d raw_xyz=%d,%d,%d",
+                frame,player_struct.level,object_id,_fdt_x,_fdt_y,i,view_w,view_h,(int)p[i]->sx,(int)p[i]->sy,
+                (int)xy[i][0],(int)xy[i][1],(int)p[i]->gX,(int)p[i]->gY,(int)p[i]->gZ);
+            captured_points[i]=*p[i];captured_points[i].sx=xy[i][0];captured_points[i].sy=xy[i][1];
+            captured[i]=&captured_points[i];
+        }
+        p=captured;
+    }
     int tex=texture_index(bm);if(tex<0)return;
     Draw *d=new_draw((n-2)*3,tex,(bm->flags&BMF_TRANS)!=0);if(!d)return;
     for(int i=1,k=d->first;i<n-1;i++){point_vertex(&vertices[k++],p[0],lit);point_vertex(&vertices[k++],p[i],lit);point_vertex(&vertices[k++],p[i+1],lit);}
+    qa_animation_capture(tex,n,xy);
 }
 void gpu_world_polygon(long color,int n,g3s_phandle *p,int gouraud) {
     if(!gpu_world_active())return;
@@ -294,20 +478,31 @@ void gpu_world_object_end(void){object_id=-1;object_lit=1;}
 int gpu_world_begin(void) {
     int previous=active;active=0;
     if(gShockPrefs.doHorrorVisuals!=3)return previous;
+    /* Secondary and picking canvases never own the retained primary commands.
+     * In particular a sequential rear view must not discard a primary image
+     * after its software world has been replaced by the UI sentinel. */
+    if(previous||(_fr_curflags&(FR_PICKUPM_MASK|FR_HACKCAM_MASK|FR_CURVIEW_MASK))||view360_is_rendering)return previous;
+    if(view360_render_on){retained=command_valid=0;log_fallback("sensaround requires whole-frame software");return previous;}
+    if(secret_render_fx){retained=command_valid=0;log_fallback("software framebuffer transition");return previous;}
     unsigned excluded=FR_PICKUPM_MASK|FR_HACKCAM_MASK|FR_PALETTE_MASK|FR_NORENDR_MASK|FR_SOLIDFR_MASK|FR_SFX_MASK|FR_OVERLAY_MASK|FR_CURVIEW_MASK;
     if(previous||(_fr_curflags&excluded)||view360_is_rendering||UseCutscenePalette||curr_clut_table||DoubleSize||
-        player_struct.level!=1||!global_fullmap||global_fullmap->cyber||player_struct.drug_status[DRUG_LSD]||player_struct.drug_status[DRUG_SIGHT]){
+        !global_fullmap||global_fullmap->cyber||player_struct.drug_status[DRUG_LSD]||player_struct.drug_status[DRUG_SIGHT]){
         if(!(_fr_curflags&(FR_PICKUPM_MASK|FR_HACKCAM_MASK))&&!previous)retained=command_valid=0;
         if(!(_fr_curflags&FR_PICKUPM_MASK))log_fallback("excluded view/effect/detail/level");
         return previous;
     }
-    if(!hv_region_tile(fr_camera_last[0]>>16,fr_camera_last[1]>>16)){retained=command_valid=0;log_fallback("camera outside Medical proof");return previous;}
-    for(size_t i=0;i<hv_medical_tile_count;i++){
+    /* Geometry support is independent of the optional Medical light fixture.
+     * Its signature gates only those authored lights, never normal terrain. */
+    medical_profile=player_struct.level==1;
+    for(size_t i=0;medical_profile&&i<hv_medical_tile_count;i++){
         const HvTile *t=&hv_medical_tiles[i];MapElem *m=MAP_GET_XY(t->x,t->y);
-        if(me_tiletype(m)!=t->type||me_height_flr(m)!=t->floor_height||me_height_ceil(m)!=t->ceiling_height||loved_textures[me_tmap_wall(m)]!=t->wall||loved_textures[me_tmap_flr(m)]!=t->floor||loved_textures[me_tmap_ceil(m)]!=t->ceiling){retained=command_valid=0;log_fallback("Medical geometry signature");return previous;}
+        if(me_tiletype(m)!=t->type||me_height_flr(m)!=t->floor_height||me_height_ceil(m)!=t->ceiling_height||loved_textures[me_tmap_wall(m)]!=t->wall||loved_textures[me_tmap_flr(m)]!=t->floor||loved_textures[me_tmap_ceil(m)]!=t->ceiling)medical_profile=0;
     }
     active=1;failed=0;failure=NULL;retained=command_valid=0;ndraw=nvertex=0;object_id=-1;++frame;
-    uploads=upload_bytes=0;capture_start=SDL_GetPerformanceCounter();
+    qa_animation_begin();
+    if(!cache_initialized){gw_cache_init(&texture_cache,MAX_TEXTURES,GW_CACHE_DEFAULT_BYTES,retire_texture,NULL);cache_initialized=1;}
+    gw_cache_begin(&texture_cache);
+    uploads=upload_bytes=0;terrain_types=0;capture_start=SDL_GetPerformanceCounter();
     view_w=_fr->draw_canvas.bm.w;view_h=_fr->draw_canvas.bm.h;
     destination.x=full_game_3d?0:SCONV_X(28);destination.y=full_game_3d?0:SCONV_Y(24);destination.w=view_w;destination.h=view_h;
     /* Invert the exact primary camera transform once, before object instancing.
@@ -319,7 +514,8 @@ int gpu_world_begin(void) {
     inverse[3]=(a[5]*a[6]-a[3]*a[8])/det;inverse[4]=(a[0]*a[8]-a[2]*a[6])/det;inverse[5]=(a[2]*a[3]-a[0]*a[5])/det;
     inverse[6]=(a[3]*a[7]-a[4]*a[6])/det;inverse[7]=(a[1]*a[6]-a[0]*a[7])/det;inverse[8]=(a[0]*a[4]-a[1]*a[3])/det;
     eye[0]=_view_position.gX/65536.f;eye[1]=_view_position.gY/65536.f;eye[2]=_view_position.gZ/65536.f;
-    for(int j=0;j<2;j++){
+    memset(light_pos,0,sizeof(light_pos));memset(light_color,0,sizeof(light_color));
+    for(int j=0;medical_profile&&j<2;j++){
         const Light *l=&medical_lights[j];MapElem *tile=MAP_GET_XY(l->tile_x,l->tile_y);
         light_pos[j*4]=l->x;light_pos[j*4+1]=l->y;
         light_pos[j*4+2]=_fr_fhgt_list[32-me_height_ceil(tile)]/65536.f-l->ceiling_offset;light_pos[j*4+3]=l->radius;
@@ -329,11 +525,14 @@ int gpu_world_begin(void) {
 }
 static void sampling(void){glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_NEAREST);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_NEAREST);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);}
 static int submit(void) {
+    if(!SDLPresenterReady()){failure="presenter reset pending";return 0;}
     SDL_GLContext now=SDL_GL_GetCurrentContext();
-    if(ready&&(context!=now||gpu_w!=view_w||gpu_h!=view_h))resources_dispose(context!=now);
+    if(ready&&context!=now){SDLRequestPresenterReset();failure="presenter context changed";return 0;}
+    if(ready&&(gpu_w!=view_w||gpu_h!=view_h))resources_dispose(0);
     if(!ready&&!initialize()){resources_dispose(0);disabled=1;gShockPrefs.doHorrorVisuals=0;return 0;}
-    SDL_Texture *old=SDL_GetRenderTarget(renderer);if(SDL_SetRenderTarget(renderer,world)<0)return 0;
+    SDL_Texture *old=SDL_GetRenderTarget(renderer);if(SDL_SetRenderTarget(renderer,world)<0){failure="GPU world target bind failure";return 0;}
     Bridge state;bridge_save(&state);
+    for(int i=0;i<MAX_TEXTURES;i++)if(texture_retired[i]){glDeleteTextures(1,&texture_gl[i]);texture_gl[i]=0;texture_retired[i]=0;}
     glDisable(GL_BLEND);glDisable(GL_DEPTH_TEST);glDisable(GL_STENCIL_TEST);glDisable(GL_SCISSOR_TEST);glDisable(GL_CULL_FACE);
     glColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE);glDepthMask(GL_FALSE);glViewport(0,0,view_w,view_h);
     glClearColor(0,0,0,1);glClear(GL_COLOR_BUFFER_BIT);glUseProgram(program);glBindVertexArray(vao);glBindBuffer(GL_ARRAY_BUFFER,vbo);
@@ -349,13 +548,39 @@ static int submit(void) {
     GLint cut=glGetUniformLocation(program,"cutout"),em=glGetUniformLocation(program,"emissive"),rec=glGetUniformLocation(program,"receivers");
     glActiveTexture(GL_TEXTURE0);
     for(int i=0;i<ndraw;i++){
-        Draw *d=&draws[i];Texture *t=&textures[d->texture];
-        if(!t->gl){glGenTextures(1,&t->gl);glBindTexture(GL_TEXTURE_2D,t->gl);sampling();glTexImage2D(GL_TEXTURE_2D,0,GL_R8UI,t->w,t->h,0,GL_RED_INTEGER,GL_UNSIGNED_BYTE,t->pixels);++uploads;upload_bytes+=t->w*t->h;}
-        else glBindTexture(GL_TEXTURE_2D,t->gl);
+        Draw *d=&draws[i];GwTextureEntry *t=&texture_cache.entries[d->texture];GLuint *name=&texture_gl[d->texture];
+        if(!*name){glGenTextures(1,name);glBindTexture(GL_TEXTURE_2D,*name);sampling();glTexImage2D(GL_TEXTURE_2D,0,GL_R8UI,t->w,t->h,0,GL_RED_INTEGER,GL_UNSIGNED_BYTE,t->pixels);++uploads;upload_bytes+=t->w*t->h;}
+        else glBindTexture(GL_TEXTURE_2D,*name);
         glUniform1i(cut,d->cutout);glUniform1i(em,d->emissive);glUniform1i(rec,d->receivers);glDrawArrays(GL_TRIANGLES,d->first,d->count);
     }
     GLenum error=glGetError();bridge_restore(&state);SDL_SetRenderTarget(renderer,old);
-    if(error){SDL_Log("GPU1B submit GL error=%x",error);return 0;}return 1;
+    if(inject("submit"))error=GL_OUT_OF_MEMORY;
+    if(error){
+        /* An allocated name does not prove its upload succeeded. Never reuse
+         * potentially incomplete textures, palettes or old VBO contents after
+         * a failed submission. The untouched software world owns this frame. */
+        SDL_Log("GPU2 submit GL error=%x: discard GPU resources; software until mode retry",error);
+        resources_dispose(0);disabled=1;gShockPrefs.doHorrorVisuals=0;
+        failure="GPU submission/upload failure";return 0;
+    }return 1;
+}
+static void log_gpu_tile_change(void) {
+    static int seen,last_level,last_x,last_y,last_floor,last_ceiling;
+    int x=fr_camera_last[0]>>16,y=fr_camera_last[1]>>16;
+    if(!global_fullmap||x<0||x>=64||y<0||y>=64)return;
+    MapElem *tile=MAP_GET_XY(x,y);
+    int floor_height=me_height_flr(tile),ceiling_height=me_height_ceil(tile);
+    if(seen&&last_level==player_struct.level&&last_x==x&&last_y==y&&
+        last_floor==floor_height&&last_ceiling==ceiling_height)return;
+    /* Successful GPU views only. Integer height fields are observed, never
+     * changed; stationary views incur no repeated logs or filesystem access. */
+    SDL_Log("GPU2 TILE frame=%u level=%d tile=%d,%d type=%d floor_raw=%d ceiling_raw=%d draws=%d camera=%.17g,%.17g,%.17g heading=%.17g pitch=%.17g raw_camera=%d,%d,%d,%d,%d",
+        frame,player_struct.level,x,y,me_tiletype(tile),floor_height,ceiling_height,ndraw,
+        fr_camera_last[0]/65536.,fr_camera_last[1]/65536.,fr_camera_last[2]/65536.,
+        fr_camera_last[3]/256.,fr_camera_last[4]/256.,(int)fr_camera_last[0],(int)fr_camera_last[1],
+        (int)fr_camera_last[2],(int)fr_camera_last[3],(int)fr_camera_last[4]);
+    seen=1;last_level=player_struct.level;last_x=x;last_y=y;
+    last_floor=floor_height;last_ceiling=ceiling_height;
 }
 void gpu_world_end(int previous) {
     if(active){
@@ -363,24 +588,33 @@ void gpu_world_end(int previous) {
         size_t size=(size_t)view_w*view_h;
         if(!failed&&software_capacity<size){unsigned char *p=realloc(software_world,size);if(!p)gpu_world_reject("software fallback allocation");else {software_world=p;software_capacity=size;}}
         if(!failed&&!submit()){failed=1;if(!failure)failure="GPU submission failure";}
+        if(!failed)measure_view(capture_start,capture_end,SDL_GetPerformanceCounter());
         if(failed){retained=0;log_fallback(failure?failure:"unknown");}
         else {
             retained=command_valid=1;
+            log_gpu_tile_change();
             for(int y=0;y<view_h;y++)memcpy(software_world+y*view_w,_fr->draw_canvas.bm.bits+y*_fr->draw_canvas.bm.row,view_w);
             /* Explicit world/UI boundary: discard completed software world only
              * after successful submission. Overlays are subsequently drawn by the
              * unmodified fr_send_view callback/copy pipeline. */
             for(int y=0;y<_fr->draw_canvas.bm.h;y++)memset(_fr->draw_canvas.bm.bits+y*_fr->draw_canvas.bm.row,255,_fr->draw_canvas.bm.w);
-            if(frame==1||frame%300==0){double ms=1000./SDL_GetPerformanceFrequency();SDL_Log("GPU1B LIVE frame=%u draws=%d triangles=%d capture_with_software_ms=%.3f submit_cpu_ms=%.3f uploads=%u bytes=%u palette_generation=%u fallbacks=%u GPU_execution_ms=unknown lights_z=%g,%g viewport=%d,%d,%d,%d",frame,ndraw,nvertex/3,(capture_end-capture_start)*ms,(SDL_GetPerformanceCounter()-capture_end)*ms,uploads,upload_bytes,palette_generation,fallbacks,light_pos[2],light_pos[6],destination.x,destination.y,destination.w,destination.h);}
+            if(frame==1||frame%300==0||diagnostic_due||logged_level!=player_struct.level){double ms=1000./SDL_GetPerformanceFrequency();SDL_Log("GPU1B LIVE frame=%u draws=%d triangles=%d capture_with_software_ms=%.3f submit_cpu_ms=%.3f uploads=%u bytes=%u palette_generation=%u fallbacks=%u GPU_execution_ms=unknown lights_z=%g,%g viewport=%d,%d,%d,%d",frame,ndraw,nvertex/3,(capture_end-capture_start)*ms,(SDL_GetPerformanceCounter()-capture_end)*ms,uploads,upload_bytes,palette_generation,fallbacks,light_pos[2],light_pos[6],destination.x,destination.y,destination.w,destination.h);}
+            if(frame==1||frame%300==0||diagnostic_due||logged_level!=player_struct.level)SDL_Log("GPU2 CACHE level=%d camera=%g,%g,%g heading=%g pitch=%g types=%llx entries=%u bytes=%zu peak_bytes=%zu hits=%llu misses=%llu evictions=%llu rejections=%llu",player_struct.level,fr_camera_last[0]/65536.,fr_camera_last[1]/65536.,fr_camera_last[2]/65536.,fr_camera_last[3]/256.,fr_camera_last[4]/256.,(unsigned long long)terrain_types,texture_cache.resident_count,texture_cache.resident_bytes,texture_cache.high_water_bytes,(unsigned long long)texture_cache.hits,(unsigned long long)texture_cache.misses,(unsigned long long)texture_cache.evictions,(unsigned long long)texture_cache.rejections);
         }
     }
+    if(active&&!failed){diagnostic_due=0;logged_level=player_struct.level;}
     active=previous;
 }
 void gpu_world_palette(int index,int count,const unsigned char *rgb) {
-    for(int i=index;i<index+count&&i<256;i++){memcpy(palette_rgb+i*4,rgb,3);palette_rgb[i*4+3]=255;rgb+=3;}++palette_generation;
+    for(int i=index;i<index+count&&i<256;i++){memcpy(palette_rgb+i*4,rgb,3);palette_rgb[i*4+3]=255;rgb+=3;}
+    /* SetSDLPalette reserves display index 255 for black in normal gameplay.
+     * Cutscenes own their software palette and never use this world target. */
+    memset(palette_rgb+255*4,0,3);palette_rgb[255*4+3]=255;++palette_generation;
 }
 void gpu_world_mode_changed(void){
-    retained=command_valid=0;disabled=0;
+    if(inject("context")){SDLInjectPresenterReset();return;}
+    retained=command_valid=0;disabled=0;diagnostic_due=1;
+    qa_animation_reset();
     if(ready&&(inject("es3")||inject("shader")||inject("fbo")))resources_dispose(0);
     if(ready&&inject("reset")){
         resources_dispose(0);
@@ -388,9 +622,26 @@ void gpu_world_mode_changed(void){
     }
 }
 void gpu_world_event(const SDL_Event *e) {
-    if(e->type==SDL_RENDER_DEVICE_RESET){resources_dispose(1);disabled=0;SDL_Log("GPU1B device-reset: rebuild all GPU resources from CPU metadata");}
+    if(e->type==SDL_RENDER_DEVICE_RESET)SDLRequestPresenterReset();
     if(e->type==SDL_RENDER_TARGETS_RESET){retained=0;SDL_Log("GPU1B target-reset: invalidate retained world");}
     if(e->type==SDL_APP_DIDENTERFOREGROUND){retained=0;SDL_Log("GPU1B foreground: require fresh primary view");}
+}
+static int restore_software_world(const char *reason) {
+    log_fallback(reason);
+    /* Fill only the world sentinel below the unmodified software UI. */
+    for(int y=0;y<view_h;y++)for(int x=0;x<view_w;x++){
+        int sx=destination.x+x,sy=destination.y+y;
+        if(sx>=0&&sy>=0&&sx<drawSurface->w&&sy<drawSurface->h){unsigned char *p=(unsigned char*)drawSurface->pixels+sy*drawSurface->pitch+sx;if(*p==255)*p=software_world[y*view_w+x];}
+    }
+    retained=command_valid=0;gShockPrefs.doHorrorVisuals=0;return 0;
+}
+void gpu_world_presenter_lost(void) {
+    if(command_valid&&software_world&&!UseCutscenePalette&&
+       (_current_loop==GAME_LOOP||_current_loop==FULLSCREEN_LOOP))
+        restore_software_world("presenter context reset");
+    resources_dispose(1);context=NULL;
+    active=retained=command_valid=0;disabled=1;diagnostic_due=1;
+    gShockPrefs.doHorrorVisuals=0;
 }
 int gpu_world_compose(void) {
     if(gShockPrefs.doHorrorVisuals!=3||!command_valid||UseCutscenePalette||(_current_loop!=GAME_LOOP&&_current_loop!=FULLSCREEN_LOOP))return 0;
@@ -398,17 +649,11 @@ int gpu_world_compose(void) {
      * paused view after reset/foreground without re-running simulation/traversal.
      * Palette cycling can update that same view without re-uploading indexed art. */
     if(!retained||!ready||context!=SDL_GL_GetCurrentContext()||uploaded_palette!=palette_generation){
-        if(!submit()){
-            log_fallback("retained view restoration failure");
-            /* The world-only software backup is complete. Restore its coverage
-             * below the unchanged software UI, never paste individual objects. */
-            for(int y=0;y<view_h;y++)for(int x=0;x<view_w;x++){
-                int sx=destination.x+x,sy=destination.y+y;
-                if(sx>=0&&sy>=0&&sx<drawSurface->w&&sy<drawSurface->h){unsigned char *p=(unsigned char*)drawSurface->pixels+sy*drawSurface->pitch+sx;if(*p==255)*p=software_world[y*view_w+x];}
-            }
-            retained=command_valid=0;gShockPrefs.doHorrorVisuals=0;return 0;
-        }
+        if(!submit())return restore_software_world("retained view restoration failure");
         retained=1;
     }
-    SDL_RenderCopy(renderer,world,NULL,&destination);return 1;
+    if(inject("compose")||SDL_RenderCopy(renderer,world,NULL,&destination)<0)
+        return restore_software_world("GPU world composition failure");
+    qa_animation_composed();
+    return 1;
 }

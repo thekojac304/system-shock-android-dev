@@ -30,6 +30,9 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 //--------------------
 #include <math.h>
 #include <SDL.h>
+#ifdef RP5NP_GPU_WORLD
+#include <EGL/egl.h>
+#endif
 #ifdef __ANDROID__
 #include <SDL_system.h>
 #include "touch_shock_bridge.h"
@@ -60,6 +63,139 @@ grs_screen *cit_screen;
 SDL_Window *window;
 SDL_Palette *sdlPalette;
 SDL_Renderer *renderer;
+
+#ifdef RP5NP_GPU_WORLD
+/* SDL's Android event pump replaces a lost EGL context, but its GLES renderer
+ * still owns the original context and object names. Retire that whole owner.
+ * All of this runs on the render thread, outside SDL event watchers. */
+static SDL_GLContext presenter_context, reset_context, cleanup_context;
+static int presenter_reset_pending, qa_invalidate_context;
+static Uint32 presenter_retry_at;
+
+int SDLPresenterReady(void) {
+    if(renderer && !presenter_reset_pending && presenter_context!=SDL_GL_GetCurrentContext())
+        SDLRequestPresenterReset();
+    return renderer != NULL && !presenter_reset_pending;
+}
+
+void SDLRequestPresenterReset(void) {
+    if(presenter_reset_pending)return;
+    reset_context=SDL_GL_GetCurrentContext();
+    presenter_reset_pending=1;presenter_retry_at=0;
+    /* Restore the indexed world before dropping its GPU composition metadata.
+     * SDL still owns its target texture until old-renderer retirement below. */
+    gpu_world_presenter_lost();
+    SDL_Log("GPU2 presenter reset requested original=%p current=%p controlled=%d; Original selected",
+            presenter_context,reset_context,qa_invalidate_context);
+}
+
+static int presenter_detach(void) {
+    /* SDL_EGL_MakeCurrent's null branch does not propagate EGL's result.
+     * Check the actual EGL binding as well as SDL's thread-local bookkeeping. */
+    return SDL_GL_MakeCurrent(window,NULL)==0 &&
+           eglGetCurrentContext()==EGL_NO_CONTEXT &&
+           SDL_GL_GetCurrentContext()==NULL;
+}
+
+static SDL_GLContext presenter_unshared_context(void) {
+    int share=0;
+    if(SDL_GL_GetAttribute(SDL_GL_SHARE_WITH_CURRENT_CONTEXT,&share)<0)return NULL;
+    if(SDL_GL_SetAttribute(SDL_GL_SHARE_WITH_CURRENT_CONTEXT,0)<0)return NULL;
+    SDL_GLContext created=SDL_GL_CreateContext(window);
+    SDL_GL_SetAttribute(SDL_GL_SHARE_WITH_CURRENT_CONTEXT,share);
+    return created;
+}
+
+static int presenter_recover(void) {
+    if(!presenter_reset_pending)return renderer!=NULL;
+    Uint32 now=SDL_GetTicks();
+    if(presenter_retry_at && (Sint32)(now-presenter_retry_at)<0)return 0;
+    presenter_retry_at=now+1000;
+    if(renderer){
+        if(!presenter_detach()){
+            SDL_Log("GPU2 presenter reset deferred: EGL detach failed; old owner retained");
+            return 0;
+        }
+        /* SDL's GLES destructor ignores a failed activation of its old context.
+         * Give it an empty, unshared namespace for that case. Do not rely on
+         * calling GL without a context, or delete old names in the new presenter.
+         * The old context may still activate: its own deletes are then valid. */
+        cleanup_context=presenter_unshared_context();
+        if(!cleanup_context){
+            SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION,2);
+            cleanup_context=presenter_unshared_context();
+        }
+        if(!cleanup_context){
+            SDL_Log("GPU2 presenter reset deferred: cleanup context unavailable: %s",SDL_GetError());
+            return 0;
+        }
+        if(qa_invalidate_context){
+            /* The old context stayed alive while both distinct temporary
+             * contexts were allocated, preventing handle reuse in this test.
+             * No context allocation occurs before SDL retires the old owner. */
+            SDL_GL_DeleteContext(presenter_context);
+            SDL_Log("GPU2 QA controlled context replacement: original invalidated before SDL teardown; not genuine EGL loss");
+        }
+        SDL_GLContext retired=presenter_context;
+        SDL_DestroyRenderer(renderer);renderer=NULL;presenter_context=NULL;
+        /* If a truly lost native handle was reused for the empty cleanup
+         * context, the SDL owner just destroyed that context too. */
+        if(cleanup_context==retired)cleanup_context=NULL;
+        if(reset_context==retired)reset_context=NULL;
+        qa_invalidate_context=0;
+        SDL_Log("GPU2 presenter old SDL owner retired");
+    }
+    if(!presenter_detach()){
+        SDL_Log("GPU2 presenter reset deferred: temporary-context detach failed");
+        return 0;
+    }
+    if(reset_context==cleanup_context)reset_context=NULL;
+    if(cleanup_context){SDL_GL_DeleteContext(cleanup_context);cleanup_context=NULL;}
+    if(reset_context){SDL_GL_DeleteContext(reset_context);reset_context=NULL;}
+    renderer=SDL_CreateRenderer(window,-1,SDL_RENDERER_ACCELERATED|SDL_RENDERER_PRESENTVSYNC);
+    if(!renderer){
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION,2);
+        renderer=SDL_CreateRenderer(window,-1,SDL_RENDERER_ACCELERATED|SDL_RENDERER_PRESENTVSYNC);
+    }
+    if(!renderer){
+        SDL_Log("GPU2 presenter reset deferred: renderer creation failed: %s",SDL_GetError());
+        return 0;
+    }
+    presenter_context=SDL_GL_GetCurrentContext();
+    int logical_w=drawSurface?drawSurface->w:grd_cap->w;
+    int logical_h=drawSurface?drawSurface->h:grd_cap->h;
+    if(SDL_RenderSetLogicalSize(renderer,logical_w,logical_h)<0){
+        SDL_Log("GPU2 presenter reset deferred: logical size failed: %s",SDL_GetError());
+        SDL_DestroyRenderer(renderer);renderer=NULL;presenter_context=NULL;
+        return 0;
+    }
+    presenter_reset_pending=0;presenter_retry_at=0;
+    gShockPrefs.doHorrorVisuals=0;
+    SDL_Log("GPU2 presenter recreation ready context=%p logical=%dx%d mode=Original; GPU requires explicit retry",
+            presenter_context,logical_w,logical_h);
+    return 1;
+}
+
+void SDLInjectPresenterReset(void) {
+    if(!SDLPresenterReady() || !presenter_context)return;
+    if(SDL_RenderFlush(renderer)<0 || SDL_GL_GetCurrentContext()!=presenter_context){
+        SDL_Log("GPU2 QA context replacement skipped: original presenter not current");
+        return;
+    }
+    SDL_GLContext replacement=presenter_unshared_context();
+    if(!replacement){
+        SDL_GL_MakeCurrent(window,presenter_context);
+        SDL_Log("GPU2 QA context replacement failed: %s",SDL_GetError());
+        return;
+    }
+    /* Keep the original alive until the cleanup context also exists. */
+    qa_invalidate_context=1;
+    SDL_Log("GPU2 QA controlled replacement allocated original=%p replacement=%p",
+            presenter_context,replacement);
+    SDL_Event event;SDL_zero(event);event.type=SDL_RENDER_DEVICE_RESET;
+    gpu_world_event(&event);
+}
+#endif
 
 SDL_AudioDeviceID device;
 
@@ -311,6 +447,9 @@ void InitSDL() {
 #endif
         return;
     }
+#ifdef RP5NP_GPU_WORLD
+    presenter_context=SDL_GL_GetCurrentContext();
+#endif
 
 #ifdef __ANDROID__
     SDL_RendererInfo rp5np_renderer_info;
@@ -410,6 +549,11 @@ void SetSDLPalette(int index, int count, uchar *pal) {
 }
 
 void SDLDraw() {
+#ifdef RP5NP_GPU_WORLD
+    if(renderer && !presenter_reset_pending && presenter_context!=SDL_GL_GetCurrentContext())
+        SDLRequestPresenterReset();
+    if(!presenter_recover())return;
+#endif
     extern uint64_t horror_visuals_clock(void);
     extern void horror_visuals_present_measure(uint64_t,uint64_t,uint64_t);
     uint64_t visual_start=horror_visuals_clock();
