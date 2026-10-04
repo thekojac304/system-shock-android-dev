@@ -491,7 +491,7 @@ static void generated_prepare(void){
         generated_level=level;generated_load_attempted=0;
         for(int i=0;i<512;i++)gpu_flicker_reset(&transient_state[i]);
     }
-    if(level!=1&&level!=6)return; /* neutral GPU on every other level */
+    if(!gg_profile_supported(level))return; /* neutral GPU on unlisted levels */
     if(!generated_load_attempted){
         uint64_t start=SDL_GetPerformanceCounter();generated_load_attempted=1;
         generated_profile=gg_profile_load(level);

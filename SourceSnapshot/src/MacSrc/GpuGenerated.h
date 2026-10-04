@@ -31,6 +31,7 @@ typedef struct {
 } GgProfile;
 
 GgProfile *gg_profile_load(int level);
+int gg_profile_supported(int level);
 void gg_profile_free(GgProfile *profile);
 const char *gg_profile_error(void);
 const GgSurface *gg_profile_find(const GgProfile *profile,GpuSurfaceId id);

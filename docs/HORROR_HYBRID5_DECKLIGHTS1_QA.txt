@@ -59,13 +59,15 @@ level-6.bin. Existing GENERATED mode selects a level-specific profile; for an
 absent level it uses neutral GPU lighting and does not reuse the previous
 level's SurfaceIds, lights, or emissive masks. The live tour crossed Medical,
 Executive, all eight profileless decks, and the Grove maps without a crash or
-missing-profile error. Medical logged loaded=1, reason=none, load_ms=11.133,
+missing-profile error. On the final APK Medical logged loaded=1, reason=none, load_ms=10.790,
 lights=265, surfaces=1653. Executive logged loaded=1, reason=none,
-load_ms=10.101 (another load 10.498), lights=179, surfaces=1589. No new deck
+load_ms=9.315, lights=179, surfaces=1589. No new deck
 claimed a loaded generated profile. Med/Exec generated lights and emissive
 surfaces remained visible with no catastrophic wall leak or room overlight in
 the sampled indoor views. Existing version/signature/CRC rejection and neutral
-fallback remain intact; no runtime or asset-packaging change was required.
+fallback remain intact. Runtime acceptance now uses a count-driven table of
+the same two signed profile identities, replacing the two hardcoded level
+comparisons; no new profile asset was packaged.
 Other unsupported levels continue to resolve to the neutral post row.
 
 4. HARDWARE VIEWS AND STATION-WIDE COVERAGE
@@ -147,9 +149,9 @@ profile-load regression was observed. Executive/Gamma: profile loaded,
 AUTO EXECUTIVE selected, HYBRID3 warm-dark tone intact. No anchor retuning.
 
 Short 300-frame CPU smoke, connected phone (GPU execution time unavailable):
-  Medical: profile load 11.133 ms, 265 lights, 1653 surfaces; GPU submission
+  Medical: final profile load 10.790 ms, 265 lights, 1653 surfaces; GPU submission
     mean about 0.041-0.060 ms in sampled windows; post mean .016-.025 ms.
-  Executive/Gamma: profile load 10.101-10.498 ms, 179 lights, 1589 surfaces;
+  Executive/Gamma: final profile load 9.315 ms, 179 lights, 1589 surfaces;
     GPU submission mean about .059-.069 ms; post mean about .014-.015 ms.
   Flight POST-ONLY indoor: no profile-load cost or generated lights;
     GPU submission mean .048-.051 ms; FLIGHT METALLIC post mean .016 ms,
@@ -157,7 +159,7 @@ Short 300-frame CPU smoke, connected phone (GPU execution time unavailable):
   New FULL HYBRID deck: not applicable; none compiled with accepted rules.
 No obvious presentation hitch was seen. No long thermal/GPU benchmark was run.
 
-Focused visual unittest discovery: 42 PASS. Connected-phone
+Focused visual unittest discovery: 43 PASS. Connected-phone
 scripts/test-horror-hybrid.py: PASS. Android NDK-built touch_qa_test executed
 on the phone: QA1_TESTS=PASS, including all-deck Auto labels, capture, mode
 cycling, lifecycle, and spawn rejection. The host touch script could not run
@@ -166,17 +168,17 @@ tests check accepted rule scope, exactly two bounded HG1P assets, payload
 CRC/signature field layout, no diagnostic JSON in APK, all ten Auto mappings,
 Grove mappings, and special-level neutral fallback. Existing generated/post
 rejection and transition tests were reused; live deck transitions provided
-the cross-deck stale-state check. There was no need to change variable-profile
-count handling for this closeout: the current loader intentionally accepts
-only levels 1 and 6 and resets on every level change. A future third accepted
-profile would require a small allowlist/signature table and an updated runtime
-test. Variable-count expansion is unverified because no third profile exists.
+the cross-deck stale-state check. A registry/asset test now checks that every
+packaged HG1P asset has exactly one matching signed runtime entry, so the
+runtime gate is count-independent. The registry still intentionally lists only
+levels 1 and 6. A future third profile requires a reviewed source signature,
+an asset, and a registry entry; actual three-profile execution is unverified.
 
 7. FINAL PACKAGE, INSTALL, AND PHONE HANDOFF
 Built QA APK:
   dist/horror-hybrid5/SystemShock-HORROR-HYBRID5-DECKLIGHTS1-qa-arm64-v8a.apk
 SHA256:
-  af701e62e0d04194cb1c670eb7c34fee88626862c250c99a8651b1213fa9c9bb
+  69ac4c3e60c79884faa48958e2e1767d6be4d0289748a1f2a2b726b44889e8bf
 Package io.github.raposomiguel50.systemshock.qa; version code 10000;
 version name 1.0.0-qa. Signer SHA256:
   6dc6baad4199aaa7637cbbe2af679156eb48731b0eacdeabc0ffaa78adcd9924.
@@ -201,6 +203,8 @@ presentation request rather than silently claiming Grove Auto works there.
 
 Visual files committed for this and the preceding uncommitted HYBRID4 pass:
   SourceSnapshot/src/MacSrc/GpuPost.h
+  SourceSnapshot/src/MacSrc/GpuGenerated.c
+  SourceSnapshot/src/MacSrc/GpuGenerated.h
   SourceSnapshot/src/MacSrc/GpuWorld.c
   AndroidProject/app/jni/touch/touch_visual_compare.h
   AndroidProject/app/jni/touch/tests/touch_qa_test.c

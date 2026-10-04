@@ -9,11 +9,17 @@
 #include <string.h>
 
 static const char *error_text="none";
-static const char *baseline[2]={
-    "ebdb77338941febd90b424bd456435ce4e3cd81bfcc5f0c7bb9ee0d1957c41e7",
-    "e481e2988d22704112ee5366029251abe93f506e35c37ec5a5efc8690d238c12"
+static const struct { int level; const char *baseline; } accepted_profiles[]={
+    {1,"ebdb77338941febd90b424bd456435ce4e3cd81bfcc5f0c7bb9ee0d1957c41e7"},
+    {6,"e481e2988d22704112ee5366029251abe93f506e35c37ec5a5efc8690d238c12"}
 };
 static const char *rules="bb9f391b82a3084d030251f18dc9c8b124992da8f5ef6d2f22356f840f16f466";
+static const char *accepted_baseline(int level){
+    for(size_t i=0;i<sizeof(accepted_profiles)/sizeof(accepted_profiles[0]);i++)
+        if(accepted_profiles[i].level==level)return accepted_profiles[i].baseline;
+    return NULL;
+}
+int gg_profile_supported(int level){return accepted_baseline(level)!=NULL;}
 typedef struct { const uint8_t *at,*end; int ok; } Reader;
 static uint8_t u8(Reader *r){if(r->at>=r->end){r->ok=0;return 0;}return *r->at++;}
 static uint16_t u16(Reader *r){uint16_t a=u8(r),b=u8(r);return a|(b<<8);}
@@ -48,7 +54,8 @@ int gg_mask_row(int material){
 }
 GgProfile *gg_profile_load(int level){
     error_text="profile unavailable";
-    if(level!=1&&level!=6)return NULL;
+    const char *baseline_signature=accepted_baseline(level);
+    if(!baseline_signature)return NULL;
     char path[64];snprintf(path,sizeof(path),"horror-generated/level-%d.bin",level);
     SDL_RWops *file=SDL_RWFromFile(path,"rb");if(!file)return NULL;
     Sint64 size=SDL_RWsize(file);
@@ -60,7 +67,7 @@ GgProfile *gg_profile_load(int level){
     if(u8(&r)!='H'||u8(&r)!='G'||u8(&r)!='1'||u8(&r)!='P')r.ok=0;
     uint32_t version=u32(&r),file_level=u32(&r),nlights=u32(&r),nsurfaces=u32(&r),nregions=u32(&r),crc=u32(&r);
     if(version!=1||file_level!=(uint32_t)level||nlights>512||nsurfaces>4096||nregions>1024||!nlights||!nsurfaces)r.ok=0;
-    if(!signature(&r,baseline[level==1?0:1])||!signature(&r,rules))r.ok=0;
+    if(!signature(&r,baseline_signature)||!signature(&r,rules))r.ok=0;
     if(!r.ok||crc32_body(r.at,(size_t)(r.end-r.at))!=crc){free(bytes);error_text="profile version/signature/checksum";return NULL;}
     GgProfile *p=calloc(1,sizeof(*p));
     if(!p){free(bytes);error_text="profile allocation";return NULL;}

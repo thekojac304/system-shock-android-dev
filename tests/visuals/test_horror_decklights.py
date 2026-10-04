@@ -1,6 +1,7 @@
 """Coverage contract for the accepted, packaged generated-light profiles."""
 import json
 from pathlib import Path
+import re
 import struct
 import unittest
 import zipfile
@@ -35,6 +36,21 @@ class DecklightCoverage(unittest.TestCase):
             self.assertEqual(zlib.crc32(blob[HEADER.size:]), crc)
             self.assertEqual(len(baseline), 32)
             self.assertEqual(len(rules), 32)
+
+    def test_runtime_registry_matches_accepted_assets(self):
+        if not QA_ASSETS.is_dir():
+            self.skipTest("QA assets require the user's owned archive")
+        loader = (ROOT / "SourceSnapshot/src/MacSrc/GpuGenerated.c").read_text()
+        world = (ROOT / "SourceSnapshot/src/MacSrc/GpuWorld.c").read_text()
+        registry = loader.split("accepted_profiles[]={", 1)[1].split("};", 1)[0]
+        accepted = {int(level): bytes.fromhex(signature) for level, signature in
+                    re.findall(r'\{(\d+),"([0-9a-f]{64})"\}', registry)}
+        assets = sorted(QA_ASSETS.glob("level-*.bin"))
+        self.assertEqual(set(accepted), {int(p.stem.split("-")[1]) for p in assets})
+        for asset in assets:
+            _, _, level, _, _, _, _, baseline, _ = HEADER.unpack_from(asset.read_bytes())
+            self.assertEqual(baseline, accepted[level])
+        self.assertIn("gg_profile_supported(level)", world)
 
     def test_qa_package_contains_only_compact_accepted_profiles(self):
         if not QA_APK.is_file():
