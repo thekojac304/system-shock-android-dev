@@ -119,5 +119,6 @@ No APK, screenshot, log, save, dist data, proprietary asset or unrelated AUDIO
 change was staged.
 
 16. COMMIT / PUSH
-Implementation and this QA report are committed locally. The exact commit hash
-is recorded in the follow-up section below. Nothing was pushed.
+Implementation, tests and this QA report were committed locally as
+767d38661796e83e5b71d4d9f7251248ce019995. This documentation-only
+follow-up records that hash. Nothing was pushed.
