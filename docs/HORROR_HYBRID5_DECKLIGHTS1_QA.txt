@@ -211,8 +211,10 @@ Visual files committed for this and the preceding uncommitted HYBRID4 pass:
   docs/HORROR_HYBRID5_DECKLIGHTS1_QA.txt
 No APK, screenshot, log, save, proprietary archive, verbose generated
 diagnostic, or unrelated AUDIO file was committed. Commit hash is recorded
-by Git and in the task final response after this document is committed; a
-commit cannot contain its own hash. Nothing was pushed.
+as 9a405681370ff772cec3f3813c3b155cbb170f96 (visual implementation,
+tests, and first QA report). This report's final addendum commit is named in
+the task final response because a commit cannot contain its own hash. Nothing
+was pushed.
 
 9. CENTRAL QUESTIONS
 1. Ordinary FULL HYBRID count: 2/10.
