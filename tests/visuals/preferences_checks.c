@@ -14,6 +14,17 @@ int main(void) {
     check("world-visuals = EnHaNcEd\n",1);
     check("world-visuals = conservative\n",1);
     check("world-visuals = HoRrOr\n",2);
+    assert(gShockPrefs.postFxMode==3);
+    check("world-post-fx = 0\n",0);
+    assert(gShockPrefs.postFxMode==0);
+    check("world-post-fx = 2\n",0);
+    assert(gShockPrefs.postFxMode==2);
+    assert(SavePrefs()==0);
+    gShockPrefs.postFxMode=0;
+    assert(LoadPrefs()==0 && gShockPrefs.postFxMode==2);
+    check("world-post-fx = 99\n",0);
+    assert(gShockPrefs.postFxMode==3);
+    check("world-visuals = HoRrOr\n",2);
     assert(SavePrefs()==0);
     gShockPrefs.doHorrorVisuals=0;
     assert(LoadPrefs()==0 && gShockPrefs.doHorrorVisuals==2 && gShockPrefs.doGamma==28);

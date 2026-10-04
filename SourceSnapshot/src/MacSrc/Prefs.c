@@ -135,6 +135,7 @@ void SetDefaultPrefs(void) {
     gShockPrefs.postChoice = 0;
     gShockPrefs.postVignette = 1;
     gShockPrefs.postGrain = 1;
+    gShockPrefs.postFxMode = 3;
     gShockPrefs.goMsgLength = 0; // Normal
     audiolog_setting = 1;
 
@@ -190,6 +191,7 @@ int16_t LoadPrefs(void) {
     gShockPrefs.postChoice = 0;
     gShockPrefs.postVignette = 1;
     gShockPrefs.postGrain = 1;
+    gShockPrefs.postFxMode = 3;
     while (fgets(line, sizeof(line), f)) {
         char *eq = strchr(line, '=');
         if (!eq)
@@ -213,6 +215,9 @@ int16_t LoadPrefs(void) {
             gShockPrefs.postVignette = is_true(value);
         } else if (strcasecmp(key, "world-post-grain") == 0) {
             gShockPrefs.postGrain = is_true(value);
+        } else if (strcasecmp(key, "world-post-fx") == 0) {
+            int mode = atoi(value);
+            if (mode >= 0 && mode <= 3) gShockPrefs.postFxMode = mode;
         } else if (strcasecmp(key, "world-visuals") == 0) {
             gShockPrefs.doHorrorVisuals =
 #ifdef RP5NP_GPU_WORLD
@@ -335,6 +340,7 @@ int16_t SavePrefs(void) {
     fprintf(f, "world-post-preset = %d\n", gShockPrefs.postChoice);
     fprintf(f, "world-post-vignette = %s\n", gShockPrefs.postVignette ? "yes" : "no");
     fprintf(f, "world-post-grain = %s\n", gShockPrefs.postGrain ? "yes" : "no");
+    fprintf(f, "world-post-fx = %d\n", gShockPrefs.postFxMode);
     fprintf(f, "%s = %d\n", PREF_MSG_LENGTH, gShockPrefs.goMsgLength);
     fprintf(f, "%s = %d\n", PREF_ALOG_SETTING, audiolog_setting);
     fprintf(f, "%s = %d\n", PREF_MIDI_BACKEND, gShockPrefs.soMidiBackend);

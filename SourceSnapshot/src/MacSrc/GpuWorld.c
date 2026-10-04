@@ -23,6 +23,7 @@
 #include "player.h"
 #include "drugs.h"
 #include "mainloop.h"
+#include "faketime.h"
 #include "gr2ss.h"
 #include <GLES3/gl3.h>
 #include <EGL/egl.h>
@@ -83,10 +84,12 @@ static uint64_t capture_start;
 static const char *failure;
 static const GpuPostPreset post_presets[] = {
     {"NEUTRAL",1.f,1.f,0.f,0.f,1.f,{1,1,1},{1,1,1},0,0,0,.8f,.3f,0},
-    {"MED CLINICAL",1.02f,1.13f,.035f,.12f,.94f,{.78f,.90f,1.05f},{1.02f,1.02f,1.f},.10f,.025f,.10f,.72f,.25f,.007f},
+    {"MED CLINICAL",1.02f,1.13f,.035f,.12f,.94f,{.78f,.90f,1.05f},{1.02f,1.02f,1.f},.10f,.025f,.10f,.72f,.25f,.007f,
+        {.53f,.63f,.68f},2.f,9.f,.070f,.070f,.030f,{-.020f,.004f,.025f},18.f,.004f},
     {"MED DISEASED",.99f,1.18f,.055f,.16f,.83f,{.77f,1.02f,1.f},{1.f,1.01f,.98f},.14f,.025f,.13f,.69f,.26f,.012f},
     {"MED CINEMATIC",1.03f,1.22f,.04f,.20f,.94f,{.78f,.88f,1.06f},{1.08f,1.03f,.92f},.13f,.08f,.14f,.73f,.26f,.006f},
-    {"EXEC DECAY",1.02f,1.17f,.04f,.17f,.94f,{.85f,.91f,1.02f},{1.07f,1.01f,.89f},.10f,.08f,.11f,.74f,.25f,.006f},
+    {"EXEC DECAY",1.02f,1.17f,.04f,.17f,.94f,{.85f,.91f,1.02f},{1.07f,1.01f,.89f},.10f,.08f,.11f,.74f,.25f,.006f,
+        {.47f,.42f,.38f},3.f,12.f,.080f,.050f,.025f,{.015f,-.010f,.012f},26.f,.003f},
     {"EXEC GOLD",1.01f,1.20f,.05f,.22f,.87f,{.92f,.94f,1.f},{1.08f,.99f,.80f},.07f,.11f,.13f,.72f,.25f,.008f},
     {"EXEC CORPORATE",1.f,1.16f,.04f,.18f,.91f,{.86f,.94f,1.03f},{1.06f,1.02f,.95f},.11f,.055f,.09f,.75f,.25f,.005f}
 };
@@ -248,7 +251,7 @@ static const char *fs =
     "uniform usampler2D indices,maskTex;uniform sampler2D pal;"
     "uniform int cutout,emissive,receivers,generated,maskRow,genCount;uniform float emissiveFactor;"
     "uniform vec4 lights[4],colors[4],maskPlanes[64];uniform ivec4 maskCounts[4];"
-    "uniform vec3 ambient;uniform float gammaExponent;"
+    "uniform vec3 ambient,cameraWorld;uniform float gammaExponent;"
     "in vec3 W;in vec2 U;in float D;out vec4 result;"
     "void main(){ivec2 sz=textureSize(indices,0);"
     "ivec2 tc=ivec2(floor(fract(U)*vec2(sz)));"
@@ -271,7 +274,8 @@ static const char *fs =
     "bool selflit=maskRow>=0?texelFetch(maskTex,ivec2(int(idx),maskRow),0).r!=0u:"
     "(idx==1u||(idx>=3u&&idx<=7u)||(idx>=11u&&idx<=31u));"
     "vec3 linear=(emissive!=0||selflit)?base*emissiveFactor:base*illumination;"
-    "result=vec4(pow(clamp(linear,0.0,1.0),vec3(gammaExponent/2.2)),1.0);}";
+    "result=vec4(pow(clamp(linear,0.0,1.0),vec3(gammaExponent/2.2)),"
+    "clamp(distance(W,cameraWorld)/24.0,0.0,1.0));}";
 
 static int inject(const char *name) {
     char path[96];snprintf(path,sizeof(path),"gpu-render1b-fail-%s.txt",name);
@@ -297,16 +301,24 @@ static const char *post_vs=
 static const char *post_fs=
     "#version 300 es\nprecision highp float;"
     "uniform sampler2D sourceWorld;uniform vec4 gradeA,gradeB;"
-    "uniform vec3 shadowTint,highlightTint;uniform vec4 tintAndFx;uniform vec3 vignette;"
+    "uniform vec3 shadowTint,highlightTint,hazeColor,shadowBias;"
+    "uniform vec4 tintAndFx,atmosphere;uniform vec2 distanceFx;uniform vec3 vignette;"
     "out vec4 result;"
     "void main(){ivec2 xy=ivec2(gl_FragCoord.xy);vec2 size=vec2(textureSize(sourceWorld,0));"
-    "vec2 uv=(vec2(xy)+.5)/size;vec3 c=texelFetch(sourceWorld,xy,0).rgb*gradeA.x;"
+    "vec2 uv=(vec2(xy)+.5)/size;vec4 src=texelFetch(sourceWorld,xy,0);"
+    "vec3 c=src.rgb*gradeA.x;"
     "float lum=dot(c,vec3(.2126,.7152,.0722));"
     "c=mix(vec3(lum),c,gradeB.x);"
     "float sw=1.0-smoothstep(.12,.62,lum),hw=smoothstep(.45,.9,lum);"
     "c*=mix(vec3(1),shadowTint,sw*tintAndFx.x);c*=mix(vec3(1),highlightTint,hw*tintAndFx.y);"
+    "c+=shadowBias*lum*sw;c*=1.0+distanceFx.y*sw;"
     "c=pow(max(c,vec3(0)),vec3(gradeA.y));c=mix(c,sqrt(c),gradeA.z);"
     "c=c/(1.0+gradeA.w*max(c-.68,vec3(0)));"
+    "float far=smoothstep(atmosphere.x,atmosphere.y,src.a*24.0)*step(0.001,src.a);"
+    "float y=dot(c,vec3(.2126,.7152,.0722));"
+    "c=mix(c,vec3(y),far*atmosphere.w);"
+    "c=vec3(.25)+(c-vec3(.25))*(1.0-far*distanceFx.x);"
+    "c=mix(c,hazeColor,far*atmosphere.z);"
     "float v=smoothstep(vignette.y,vignette.y+vignette.z,length((uv-.5)*vec2(1.2,1.0))*2.0);"
     "c*=1.0-v*vignette.x;"
     "float noise=fract(sin(dot(vec2(xy),vec2(12.9898,78.233)))*43758.5453)-.5;"
@@ -746,7 +758,7 @@ static int submit(void) {
     for(int i=0;i<MAX_TEXTURES;i++)if(texture_retired[i]){glDeleteTextures(1,&texture_gl[i]);texture_gl[i]=0;texture_retired[i]=0;}
     glDisable(GL_BLEND);glDisable(GL_DEPTH_TEST);glDisable(GL_STENCIL_TEST);glDisable(GL_SCISSOR_TEST);glDisable(GL_CULL_FACE);
     glColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE);glDepthMask(GL_FALSE);glViewport(0,0,view_w,view_h);
-    glClearColor(0,0,0,1);glClear(GL_COLOR_BUFFER_BIT);glUseProgram(program);glBindVertexArray(vao);glBindBuffer(GL_ARRAY_BUFFER,vbo);
+    glClearColor(0,0,0,0);glClear(GL_COLOR_BUFFER_BIT);glUseProgram(program);glBindVertexArray(vao);glBindBuffer(GL_ARRAY_BUFFER,vbo);
     glBufferData(GL_ARRAY_BUFFER,nvertex*sizeof(Vertex),vertices,GL_STREAM_DRAW);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER,0);glPixelStorei(GL_UNPACK_ALIGNMENT,1);glPixelStorei(GL_UNPACK_ROW_LENGTH,0);glPixelStorei(GL_UNPACK_SKIP_ROWS,0);glPixelStorei(GL_UNPACK_SKIP_PIXELS,0);
     glActiveTexture(GL_TEXTURE1);glBindTexture(GL_TEXTURE_2D,palette);sampling();
@@ -771,6 +783,7 @@ static int submit(void) {
     }
     float g=fmaxf(.1f,fminf(1.f,gShockPrefs.doGamma/100.f)),exponent=1.f/((1-(1-g)*(1-g))*2.2f);
     glUniform1f(glGetUniformLocation(program,"gammaExponent"),exponent);
+    glUniform3f(glGetUniformLocation(program,"cameraWorld"),eye[0],eye[2],-eye[1]);
     GLint cut=glGetUniformLocation(program,"cutout"),em=glGetUniformLocation(program,"emissive"),rec=glGetUniformLocation(program,"receivers");
     GLint row=glGetUniformLocation(program,"maskRow"),gen_count=glGetUniformLocation(program,"genCount");
     GLint light_loc=glGetUniformLocation(program,"lights"),color_loc=glGetUniformLocation(program,"colors");
@@ -937,6 +950,15 @@ static SDL_Texture *post_process(void) {
     glUniform4f(glGetUniformLocation(post_program,"tintAndFx"),preset->shadow_strength,preset->highlight_strength,
         gShockPrefs.postGrain?preset->grain:0.f,0.f);
     glUniform3f(glGetUniformLocation(post_program,"vignette"),gShockPrefs.postVignette?preset->vignette:0.f,preset->radius,preset->softness);
+    int fx=gShockPrefs.postFxMode;
+    glUniform4f(glGetUniformLocation(post_program,"atmosphere"),preset->haze_start,
+        fmaxf(preset->haze_end,preset->haze_start+.001f),
+        fx>=1?preset->haze_strength:0.f,fx>=2?preset->far_desaturation:0.f);
+    glUniform2f(glGetUniformLocation(post_program,"distanceFx"),fx>=2?preset->far_contrast:0.f,
+        fx>=3?gpu_post_drift(player_struct.game_time/(float)CIT_CYCLE,preset->drift_period,preset->drift_strength):0.f);
+    glUniform3fv(glGetUniformLocation(post_program,"hazeColor"),1,preset->haze_color);
+    if(fx>=3)glUniform3fv(glGetUniformLocation(post_program,"shadowBias"),1,preset->shadow_bias);
+    else glUniform3f(glGetUniformLocation(post_program,"shadowBias"),0.f,0.f,0.f);
     glDrawArrays(GL_TRIANGLES,0,3);
     err=glGetError();bridge_restore(&state);SDL_SetRenderTarget(renderer,old);
     if(err||inject("post-submit")){post_disable("fullscreen pass");return world;}
@@ -944,7 +966,7 @@ static SDL_Texture *post_process(void) {
     if(post_timing_samples==300){
         double total=0;for(int i=0;i<300;i++)total+=post_samples[i];
         qsort(post_samples,300,sizeof(double),compare_sample);
-        SDL_Log("POST1 TIMING samples=300 cpu_mean_ms=%.3f p95=%.3f GPU_execution_ms=unknown preset=%s",total/300,post_samples[284],preset->name);
+        SDL_Log("POST1 TIMING samples=300 cpu_mean_ms=%.3f p95=%.3f GPU_execution_ms=unknown preset=%s fx=%d",total/300,post_samples[284],preset->name,fx);
         post_timing_samples=0;
     }
     return post_world;

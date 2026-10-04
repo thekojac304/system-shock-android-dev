@@ -1899,14 +1899,15 @@ static void post_button_draw(uchar butid) {
         break;
     case 2: strcpy(label,gShockPrefs.postVignette?"VIGNETTE\nON":"VIGNETTE\nOFF");break;
     case 3: strcpy(label,gShockPrefs.postGrain?"GRAIN\nON":"GRAIN\nOFF");break;
-    case 4: strcpy(label,"RESET\nAUTO");break;
+    case 4: snprintf(label,sizeof(label),"FX\n%s",gShockPrefs.postFxMode==0?"BASE":gShockPrefs.postFxMode==1?"HAZE":gShockPrefs.postFxMode==2?"DIST":"FULL");break;
+    case 5: strcpy(label,"RESET\nAUTO");break;
     default: strcpy(label,"VIDEO\nBACK");break;
     }
     text_button(label,BR(butid).ul.x,BR(butid).ul.y,BUTTON_COLOR,BUTTON_SHADOW,
                 BR(butid).ul.x-BR(butid).lr.x,BR(butid).ul.y-BR(butid).lr.y);
 }
 static void post_button_toggle(uchar butid) {
-    if(butid==5){video_screen_init();return;}
+    if(butid==6){video_screen_init();return;}
     if(butid==0)gShockPrefs.postEnabled=!gShockPrefs.postEnabled;
     if(butid==1){
         int first=player_struct.level==1?1:player_struct.level==6?4:0;
@@ -1915,7 +1916,8 @@ static void post_button_toggle(uchar butid) {
     }
     if(butid==2)gShockPrefs.postVignette=!gShockPrefs.postVignette;
     if(butid==3)gShockPrefs.postGrain=!gShockPrefs.postGrain;
-    if(butid==4){gShockPrefs.postChoice=0;gShockPrefs.postEnabled=1;gShockPrefs.postVignette=1;gShockPrefs.postGrain=1;}
+    if(butid==4)gShockPrefs.postFxMode=(gShockPrefs.postFxMode+1)%4;
+    if(butid==5){gShockPrefs.postChoice=0;gShockPrefs.postEnabled=1;gShockPrefs.postVignette=1;gShockPrefs.postGrain=1;gShockPrefs.postFxMode=3;}
     uiHideMouse(NULL);render_run();
     if(full_game_3d)opanel_redraw(FALSE);
     post_screen_init();uiShowMouse(NULL);
@@ -1923,8 +1925,8 @@ static void post_button_toggle(uchar butid) {
 static void post_screen_init(void) {
     LGRect r;
     clear_obuttons();
-    for(int i=0;i<6;i++){
-        standard_button_rect(&r,i,2,2,2);
+    for(int i=0;i<7;i++){
+        standard_button_rect(&r,i,2,3,2);
         pushbutton_init(i,'p',ID_NULL,post_button_toggle,&r);
         OButtons[i].drawfunc=post_button_draw;
     }

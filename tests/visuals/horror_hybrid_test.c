@@ -2,6 +2,7 @@
 #include "GpuFlicker.h"
 #include "GpuPost.h"
 #include <assert.h>
+#include <math.h>
 #include <stdio.h>
 
 int main(void) {
@@ -25,6 +26,25 @@ int main(void) {
     assert(gpu_post_resolve(6,2)==4);
     assert(gpu_post_resolve(1,5)==1);
     assert(gpu_post_resolve(2,3)==0);
+    assert(gpu_post_distance_factor(2.f,3.f,12.f)==0.f);
+    assert(gpu_post_distance_factor(15.f,3.f,12.f)==1.f);
+    assert(fabsf(gpu_post_distance_factor(7.5f,3.f,12.f)-.5f)<.0001f);
+    assert(gpu_post_distance_factor(8.f,12.f,3.f)==0.f);
+    for(int i=-100;i<=100;i++){
+        float distance=i*.25f;
+        float factor=gpu_post_distance_factor(distance,2.5f,13.f);
+        assert(factor>=0.f&&factor<=1.f);
+        assert(factor*.06f<=.06f); /* Far saturation reduction. */
+        assert(factor*.035f<=.035f); /* Far contrast reduction. */
+    }
+    assert(gpu_post_shadow_weight(0.f)==1.f);
+    assert(gpu_post_shadow_weight(1.f)==0.f);
+    assert(gpu_post_shadow_weight(.2f)>gpu_post_shadow_weight(.8f));
+    assert(gpu_post_shadow_weight(0.f)*0.f==0.f); /* Pure black is not tinted. */
+    assert(gpu_post_drift(123.f,18.f,0.f)==0.f);
+    assert(gpu_post_drift(123.f,0.f,.004f)==0.f);
+    for(int i=0;i<10000;i++)assert(fabsf(gpu_post_drift(i*.01f,18.f,.004f))<=.004001f);
+    assert(fabsf(gpu_post_drift(3600.f,18.f,.004f))<.00001f);
     puts("HORROR_HYBRID_TEST=PASS");
     return 0;
 }

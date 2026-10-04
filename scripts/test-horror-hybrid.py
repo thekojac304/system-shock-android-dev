@@ -13,7 +13,7 @@ subprocess.run([str(clang), '--target=aarch64-linux-android33', '-std=c11',
                 '-Wall', '-Wextra', '-Werror', '-O2',
                 '-I' + str(root / 'SourceSnapshot/src/MacSrc'),
                 str(root / 'tests/visuals/horror_hybrid_test.c'),
-                '-Wl,-z,max-page-size=16384', '-o', str(binary)], check=True)
+                '-Wl,-z,max-page-size=16384', '-lm', '-o', str(binary)], check=True)
 remote = '/data/local/tmp/shock-horror-hybrid-test'
 try:
     subprocess.run([str(adb), 'push', str(binary), remote], check=True, capture_output=True)
