@@ -16,6 +16,7 @@ static FILE *capture;
 static TouchControls t;
 static float sx=1.25f, sy=1.25f;
 static SDL_Rect viewport={320,0,1280,960};
+Uint32 SDL_GetTicks(void) { return 1000; }
 void SDL_RenderGetScale(SDL_Renderer *r,float *x,float *y) {(void)r; *x=sx; *y=sy;}
 int SDL_RenderSetScale(SDL_Renderer *r,float x,float y) {(void)r; sx=x; sy=y; return 0;}
 void SDL_RenderGetViewport(SDL_Renderer *r,SDL_Rect *v) {

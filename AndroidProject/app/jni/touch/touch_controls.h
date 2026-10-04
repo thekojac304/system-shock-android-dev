@@ -11,7 +11,7 @@
 typedef enum { TOUCH_GAMEPLAY, TOUCH_CURSOR } TouchMode;
 typedef enum {
     TOUCH_NONE, TOUCH_MOVE, TOUCH_LOOK, TOUCH_FIRE, TOUCH_USE,
-    TOUCH_CURSOR_OWNER, TOUCH_MODE_TOGGLE, TOUCH_ACTION
+    TOUCH_CURSOR_OWNER, TOUCH_MODE_TOGGLE, TOUCH_ACTION, TOUCH_COMPARE_MODE, TOUCH_COMPARE_POST
 } TouchRole;
 typedef enum {
     TOUCH_JUMP, TOUCH_CROUCH, TOUCH_WEAPON_PREV, TOUCH_WEAPON_NEXT,
@@ -26,7 +26,7 @@ typedef enum {
     TOUCH_POINTER_DOWN, TOUCH_POINTER_MOVE, TOUCH_POINTER_UP,
     TOUCH_MODE_CHANGED, TOUCH_CANCEL, TOUCH_ACTION_DOWN, TOUCH_ACTION_UP,
     TOUCH_POINTER_TAP, TOUCH_UI_CHANGED, TOUCH_SETTINGS_SAVE,
-    TOUCH_RADIAL_SELECT, TOUCH_HAPTIC, TOUCH_QA_COMMAND
+    TOUCH_RADIAL_SELECT, TOUCH_HAPTIC, TOUCH_QA_COMMAND, TOUCH_VISUAL_COMPARE
 } TouchOutput;
 /* Outputs are ordered edges, not polled booleans: even a down/up between
    game polls reaches the original input queue. Cancellation invalidates them. */
@@ -70,7 +70,11 @@ typedef struct {
     unsigned fire_count, use_count;
     unsigned action_count[TOUCH_ACTION_COUNT];
     bool sprint_latched;
-    bool qa_enabled, qa_god;
+    bool qa_enabled, qa_god, compare_enabled;
+    int compare_mode, compare_post_enabled, compare_post_choice, compare_level;
+    int compare_pressed; /* 0 MODE, 1 POST, -1 idle */
+    int compare_notice; /* 0 MODE, 1 POST, -1 hidden */
+    uint32_t compare_notice_until;
     const char *qa_status;
     TouchRadialSelector radial;
     TouchRadialPopulate radial_populate;
@@ -103,6 +107,8 @@ void touch_ui_finger(TouchControls *t, TouchPhase phase, int64_t device, int64_t
                      float x, float y);
 void touch_finger(TouchControls *t, TouchPhase phase, int64_t device, int64_t finger,
                   float surface_x, float surface_y, uint32_t timestamp_ms);
+TouchRect touch_compare_bounds(const TouchControls *t, int button);
+int touch_compare_hit(const TouchControls *t, float x, float y);
 void touch_tick(TouchControls *t, uint32_t timestamp_ms);
 /* Sole surface -> game transform; clamp only after gameplay ownership. */
 void touch_map_cursor(float x, float y, TouchRect viewport, float scale_x,

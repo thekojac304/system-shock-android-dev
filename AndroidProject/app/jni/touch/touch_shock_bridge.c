@@ -6,11 +6,15 @@
 #include "mainloop.h"
 #include "mouselook.h"
 #include "input.h"
+#include "touch_visual_compare.h"
 #include <stddef.h>
 #include <stdio.h>
 #ifdef RP5NP_QA_TOOLS
+#include "Prefs.h"
+#include "horror_visuals.h"
 #include "qa_tools.h"
 static int qa_pending=-1;
+static int compare_pending=-1;
 #endif
 #if defined(__ANDROID__) && !defined(TOUCH_HEADLESS)
 #include <jni.h>
@@ -162,9 +166,17 @@ static void output(void *user, TouchOutput event, float x, float y) {
             qa_pending=(int)x;
 #endif
         break;
+    case TOUCH_VISUAL_COMPARE:
+#ifdef RP5NP_QA_TOOLS
+        if (touch.compare_enabled && touch.gameplay_available &&
+            touch.panel==TOUCH_UI_CLOSED && compare_pending<0)
+            compare_pending=(int)x;
+#endif
+        break;
     case TOUCH_CANCEL:
 #ifdef RP5NP_QA_TOOLS
         qa_pending=-1;
+        compare_pending=-1;
 #endif
         clear_movement();
         touch_input_cancel();
@@ -287,6 +299,24 @@ void touch_bridge_cancel(void) {
 
 void touch_bridge_after_input(void) {
 #ifdef RP5NP_QA_TOOLS
+    if (compare_pending>=0) {
+        int button=compare_pending;
+        compare_pending=-1;
+        if (gameplay_available() && touch.compare_enabled &&
+            touch.panel==TOUCH_UI_CLOSED && !controller_connected) {
+            if (button==0)
+                horror_visuals_set_mode(touch_compare_next_mode(gShockPrefs.doHorrorVisuals));
+            else if (button==1) {
+                TouchPostChoice next=touch_compare_next_post(player_struct.level,
+                    gShockPrefs.postEnabled,gShockPrefs.postChoice);
+                gShockPrefs.postEnabled=next.enabled;
+                gShockPrefs.postChoice=next.choice;
+                SavePrefs();
+            }
+            touch.compare_notice=button;
+            touch.compare_notice_until=SDL_GetTicks()+1600;
+        }
+    }
     /* Run only after uiPoll has unwound. Level loads must not re-enter the
        SDL event dispatcher or execute while the renderer is drawing. */
     if (qa_pending>=0) {
@@ -339,6 +369,11 @@ void touch_bridge_sync(void) {
     }
     bool available = gameplay_available();
 #ifdef RP5NP_QA_TOOLS
+    touch.compare_enabled=true; /* QA application only; normal release omits this branch. */
+    touch.compare_mode=gShockPrefs.doHorrorVisuals;
+    touch.compare_post_enabled=gShockPrefs.postEnabled;
+    touch.compare_post_choice=gShockPrefs.postChoice;
+    touch.compare_level=player_struct.level;
     bool qa_enabled=qa_tools_enabled();
     if (!qa_enabled && touch.panel==TOUCH_UI_QA) touch_bridge_cancel();
     touch.qa_enabled=qa_enabled;
@@ -426,7 +461,8 @@ void touch_bridge_event(const SDL_Event *event) {
             return;
         }
         if (surface.phase == TOUCH_DOWN && touch.enabled && touch.effective_mode == TOUCH_GAMEPLAY &&
-            touch.panel==TOUCH_UI_CLOSED)
+            touch.panel==TOUCH_UI_CLOSED &&
+            touch_compare_hit(&touch,surface.x,surface.y)<0)
             request_mode(true);
         TouchMode before_mode = touch.mode;
         touch_finger(&touch, surface.phase, surface.device, surface.finger,

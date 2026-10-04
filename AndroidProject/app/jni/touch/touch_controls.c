@@ -34,6 +34,7 @@ void touch_init(TouchControls *t, TouchEmit callback, void *user) {
     t->mode = TOUCH_GAMEPLAY;
     t->effective_mode = TOUCH_CURSOR;
     t->move_owner = t->look_owner = t->cursor_owner = -1;
+    t->compare_pressed=t->compare_notice=-1;
     touch_radial_close(&t->radial);
     t->emit = callback;
     t->user = user;
@@ -56,6 +57,7 @@ void touch_cancel(TouchControls *t) {
     t->fire_count = t->use_count = 0;
     memset(t->action_count, 0, sizeof(t->action_count));
     t->sprint_latched = false;
+    t->compare_pressed=-1;
     emit(t, TOUCH_CANCEL, 0, 0);
 }
 
@@ -91,6 +93,20 @@ static bool in_circle(float x, float y, TouchCircle c) {
 
 static bool in_rect(float x, float y, TouchRect r) {
     return x >= r.x && x <= r.x+r.w && y >= r.y && y <= r.y+r.h;
+}
+
+TouchRect touch_compare_bounds(const TouchControls *t, int button) {
+    float w=t->layout.width,h=t->layout.height;
+    if (button<0 || button>1 || w<=0 || h<=0) return (TouchRect){0};
+    return (TouchRect){w*.018f,h*(button ? .365f : .265f),w*.125f,h*.08f};
+}
+
+int touch_compare_hit(const TouchControls *t, float x, float y) {
+    if (!t->enabled || !t->compare_enabled || !t->gameplay_available ||
+        t->controller || t->panel!=TOUCH_UI_CLOSED) return -1;
+    for (int button=0;button<2;++button)
+        if (in_rect(x,y,touch_compare_bounds(t,button))) return button;
+    return -1;
 }
 
 static void move_finger(TouchControls *t, TouchFinger *f, float x, float y) {
@@ -175,7 +191,11 @@ void touch_finger(TouchControls *t, TouchPhase phase, int64_t device, int64_t id
         if (index >= 0 || free_slot < 0) return;
         index = free_slot;
         TouchRole role = TOUCH_NONE;
-        if (!t->controller && t->pause_available &&
+        int compare=touch_compare_hit(t,x,y);
+        if (compare>=0) {
+            role=compare ? TOUCH_COMPARE_POST : TOUCH_COMPARE_MODE;
+            t->compare_pressed=compare;
+        } else if (!t->controller && t->pause_available &&
             in_circle(x, y, t->layout.action[TOUCH_PAUSE])) {
             role = TOUCH_ACTION;
         } else if (!t->controller && t->gameplay_available && in_rect(x, y, t->layout.toggle)) {
@@ -270,6 +290,17 @@ void touch_finger(TouchControls *t, TouchPhase phase, int64_t device, int64_t id
         }
     }
     if (phase != TOUCH_UP) return;
+    if (f->role==TOUCH_COMPARE_MODE || f->role==TOUCH_COMPARE_POST) {
+        int button=f->role==TOUCH_COMPARE_POST;
+        t->compare_pressed=-1;
+        float dx=x-f->start_x,dy=y-f->start_y;
+        if (timestamp_ms-f->down_ms<=TOUCH_TAP_MS &&
+            dx*dx+dy*dy<=t->cursor_slop*t->cursor_slop*4 &&
+            touch_compare_hit(t,x,y)==button)
+            emit(t,TOUCH_VISUAL_COMPARE,(float)button,0);
+        f->active=false;
+        return;
+    }
     if (f->role == TOUCH_MOVE) {
         t->move_owner = -1; t->movement_x = t->movement_y = 0;
     }

@@ -1,14 +1,16 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 #include "touch_controls.h"
+#include "touch_visual_compare.h"
 #include "qa_spawn.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-static int command=-1,commands,game_edges;
+static int command=-1,commands,game_edges,compare_command=-1,compare_commands;
 static void output(void *u,TouchOutput e,float x,float y) {
     (void)u; (void)y;
     if (e==TOUCH_QA_COMMAND) { command=(int)x; ++commands; }
+    if (e==TOUCH_VISUAL_COMPARE) { compare_command=(int)x; ++compare_commands; }
     if (e==TOUCH_FIRE_DOWN || e==TOUCH_ACTION_DOWN || e==TOUCH_POINTER_DOWN ||
         e==TOUCH_POINTER_TAP || e==TOUCH_USE_PRESS) ++game_edges;
 }
@@ -41,10 +43,51 @@ int main(int argc,char **argv) {
     tiles[(21*64+21)*16+4]=0;
     tiles[(21*64+21)*16+2]=30; /* ceiling down from 31, not absolute */
     assert(!qa_spawn_tile(tiles,21,21,3,false));
+    int mode=0;
+    const int modes[]={2,3,4,0};
+    for (int i=0;i<4;++i) assert((mode=touch_compare_next_mode(mode))==modes[i]);
+    assert(touch_compare_next_mode(1)==2);
+    for (int level=1;level<=6;level+=5) {
+        int enabled=0,choice=0,first=level==1?1:4;
+        const int choices[]={0,first,first+1,first+2,0};
+        const int flags[]={1,1,1,1,0};
+        for (int i=0;i<5;++i) {
+            TouchPostChoice next=touch_compare_next_post(level,enabled,choice);
+            enabled=next.enabled; choice=next.choice;
+            assert(enabled==flags[i] && choice==choices[i]);
+        }
+    }
+    TouchPostChoice neutral=touch_compare_next_post(2,0,3);
+    assert(neutral.enabled && neutral.choice==0);
+    neutral=touch_compare_next_post(2,neutral.enabled,neutral.choice);
+    assert(!neutral.enabled && neutral.choice==0);
+    assert(!strcmp(touch_compare_mode_label(4),"GPU GENERATED"));
+    assert(!strcmp(touch_compare_post_label(1,1,1),"MED A"));
+    assert(!strcmp(touch_compare_post_label(6,1,4),"EXEC A"));
+    assert(!strcmp(touch_compare_post_label(6,1,1),"POST AUTO"));
     for (int orientation=0;orientation<2;++orientation) {
         TouchControls t;
         touch_init(&t,output,NULL);
         touch_configure(&t,orientation ? 960 : 1920,orientation ? 1920 : 960,true,true,false);
+        t.compare_enabled=true;
+        int before_compare=compare_commands, before_game=game_edges;
+        for (int button=0;button<2;++button) {
+            TouchRect b=touch_compare_bounds(&t,button);
+            assert(b.x>=0 && b.y>=0 && b.x+b.w<=t.layout.width &&
+                   b.y+b.h<=t.layout.height);
+            tap(&t,b,button+20);
+            assert(compare_commands==before_compare+button+1 && compare_command==button);
+            assert(game_edges==before_game && t.move_owner<0 && t.look_owner<0 &&
+                   t.cursor_owner<0 && t.fire_count==0 && t.use_count==0);
+        }
+        TouchRect compare=touch_compare_bounds(&t,0);
+        touch_finger(&t,TOUCH_DOWN,1,30,compare.x+compare.w/2,compare.y+compare.h/2,1);
+        touch_finger(&t,TOUCH_UP,1,30,compare.x+compare.w/2+compare.w,compare.y+compare.h/2,2);
+        assert(compare_commands==before_compare+2 && game_edges==before_game);
+        touch_set_mode(&t,TOUCH_CURSOR);
+        tap(&t,touch_compare_bounds(&t,1),31);
+        assert(compare_commands==before_compare+3 && game_edges==before_game);
+        touch_set_mode(&t,TOUCH_GAMEPLAY);
         TouchLayout normal=t.layout;
         tap(&t,touch_control_bounds(&t,TC_SETTINGS),1);
         assert(t.panel==TOUCH_UI_SETTINGS && touch_ui_bounds(&t,TU_QA).w==0);

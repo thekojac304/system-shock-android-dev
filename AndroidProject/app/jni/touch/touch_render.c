@@ -1,6 +1,7 @@
 /* Full-surface touch UI; original logical rendering is restored after drawing.
    SPDX-License-Identifier: GPL-3.0-or-later */
 #include "touch_controls.h"
+#include "touch_visual_compare.h"
 #include <SDL.h>
 #include <math.h>
 #include <stdio.h>
@@ -169,6 +170,37 @@ static void controls(const TouchControls *t,SDL_Renderer *r) {
         text(r,name,b.x+b.w/2,b.y+b.h/2,h/240*t->settings.control[id].scale,b.w*.86f);
     }
 }
+static void visual_compare(const TouchControls *t,SDL_Renderer *r) {
+    if (!t->compare_enabled || !t->gameplay_available || t->controller ||
+        t->panel!=TOUCH_UI_CLOSED) return;
+    float h=t->layout.height;
+    for (int button=0;button<2;++button) {
+        TouchRect b=touch_compare_bounds(t,button);
+        bool down=t->compare_pressed==button;
+        float opacity=fmaxf(.42f,t->settings.opacity*.55f);
+        color(r,down?35:12,down?127:39,down?143:53,down?220:145,opacity);
+        rect(r,b,true);
+        color(r,down?235:173,down?250:226,down?252:232,down?255:235,opacity);
+        rect(r,b,false);
+        color(r,235,247,246,255,fmaxf(.65f,opacity));
+        text(r,button?"POST":"MODE",b.x+b.w*.5f,b.y+b.h*.5f,
+             h/230,b.w*.84f);
+    }
+    Uint32 now=SDL_GetTicks();
+    int32_t remaining=(int32_t)(t->compare_notice_until-now);
+    if (t->compare_notice<0 || remaining<=0) return;
+    float fade=fminf(1.0f,(float)remaining/350.0f);
+    const char *label=t->compare_notice==0 ?
+        touch_compare_mode_label(t->compare_mode) :
+        touch_compare_post_label(t->compare_level,t->compare_post_enabled,
+                                 t->compare_post_choice);
+    TouchRect b=touch_compare_bounds(t,t->compare_notice);
+    TouchRect banner={b.x+b.w+h*.014f,b.y,b.w*1.6f,b.h};
+    color(r,8,22,30,170,fade); rect(r,banner,true);
+    color(r,230,247,245,255,fade);
+    text(r,label,banner.x+banner.w*.5f,banner.y+banner.h*.5f,
+         h/250,banner.w*.9f);
+}
 static const char *ui_label(const TouchControls *t,int action) {
     static const char *decks[]={"MEDICAL","RESEARCH","REACTOR","MAINTENANCE",
         "STORAGE","FLIGHT DECK","EXECUTIVE","ALPHA GROVE","BETA GROVE",
@@ -268,6 +300,7 @@ void touch_draw(const TouchControls *t,SDL_Renderer *r) {
     SDL_RenderSetClipRect(r,NULL);
     SDL_SetRenderDrawBlendMode(r,SDL_BLENDMODE_BLEND);
     controls(t,r);
+    if (t->panel==TOUCH_UI_CLOSED) visual_compare(t,r);
     if (t->panel==TOUCH_UI_CLOSED) radial(t,r);
     if (t->panel!=TOUCH_UI_CLOSED) panel(t,r);
     SDL_SetRenderDrawBlendMode(r,blend);
