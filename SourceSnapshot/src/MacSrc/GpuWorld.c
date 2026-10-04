@@ -3,6 +3,7 @@
  * remains authoritative until the entire GPU view has succeeded. No readback. */
 #include "GpuWorld.h"
 #include "GpuTextureCache.h"
+#include "GpuGenerated.h"
 #include "GpuGeometry.h"
 #include "GlobalV.h"
 #include "Prefs.h"
@@ -40,7 +41,7 @@ extern int secret_render_fx;
 
 enum { MAX_DRAWS=4096, MAX_VERTICES=32768, MAX_TEXTURES=GW_CACHE_MAX_SLOTS };
 typedef struct { float clip[4], world[3], uv[2], darkness; } Vertex;
-typedef struct { int first, count, texture, cutout, emissive, receivers, material_id; GpuSurfaceId surface; } Draw;
+typedef struct { int first, count, texture, cutout, emissive, receivers, material_id,mask_row,ambient_tile; GpuSurfaceId surface; const GgSurface *generated_surface; } Draw;
 typedef struct { float x,y,ceiling_offset,radius,rgb[3],intensity; int tile_x,tile_y; } Light;
 static const Light medical_lights[2] = {
     {30.0f,23.8f,0.35f,4.2f,{0.13f,0.8f,1.0f},2.4f,30,23},
@@ -56,17 +57,21 @@ static int cache_initialized;
 static int active, failed, object_id=-1, object_lit=1, ndraw, nvertex, ready, disabled;
 static GpuSurfaceId current_surface;
 static int medical_profile;
+static GgProfile *generated_profile;
+static int generated_level=-1,generated_load_attempted,generated_active;
 static unsigned frame, fallbacks, uploads, upload_bytes;
+static unsigned generated_draws,generated_refs,generated_max_refs,generated_partials;
 static int retained, command_valid, view_w,view_h, gpu_w,gpu_h;
 static unsigned char *software_world;
 static size_t software_capacity;
 static SDL_Rect destination;
 static SDL_Texture *world;
-static GLuint program,vao,vbo,palette,depth;
+static GLuint program,vao,vbo,palette,mask_texture,depth;
+static int uploaded_masks_level=-1;
 static SDL_GLContext context;
 static unsigned char palette_rgb[1024];
 static unsigned palette_generation=1, uploaded_palette;
-static float inverse[9],eye[3],light_pos[8],light_color[8];
+static float inverse[9],eye[3],light_pos[16],light_color[16];
 static uint64_t capture_start;
 static const char *failure;
 static double capture_samples[300],submit_samples[300];
@@ -170,7 +175,7 @@ static void measure_view(uint64_t begin,uint64_t captured,uint64_t submitted) {
 /* Only state actually changed by this pass is saved. Vertex attributes and
  * EBO live in our private VAO; SDL's VAO/attribute pointers are never edited. */
 typedef struct {
-    GLint program,vao,vbo,active,tex[2],viewport[4],scissor[4],unpack,row,skiprows,skippixels,pbo;
+    GLint program,vao,vbo,active,tex[3],viewport[4],scissor[4],unpack,row,skiprows,skippixels,pbo;
     GLint draw_fbo,read_fbo,renderbuffer;
     GLboolean blend,depth,stencil,scissor_on,cull,mask[4],depthmask;
     GLfloat clear[4];
@@ -179,7 +184,7 @@ static void bridge_save(Bridge *s) {
     SDL_RenderFlush(renderer);
     glGetIntegerv(GL_CURRENT_PROGRAM,&s->program); glGetIntegerv(GL_VERTEX_ARRAY_BINDING,&s->vao);
     glGetIntegerv(GL_ARRAY_BUFFER_BINDING,&s->vbo); glGetIntegerv(GL_ACTIVE_TEXTURE,&s->active);
-    for(int i=0;i<2;i++){glActiveTexture(GL_TEXTURE0+i);glGetIntegerv(GL_TEXTURE_BINDING_2D,&s->tex[i]);}
+    for(int i=0;i<3;i++){glActiveTexture(GL_TEXTURE0+i);glGetIntegerv(GL_TEXTURE_BINDING_2D,&s->tex[i]);}
     glGetIntegerv(GL_VIEWPORT,s->viewport);glGetIntegerv(GL_SCISSOR_BOX,s->scissor);
     glGetIntegerv(GL_UNPACK_ALIGNMENT,&s->unpack);glGetIntegerv(GL_UNPACK_ROW_LENGTH,&s->row);
     glGetIntegerv(GL_UNPACK_SKIP_ROWS,&s->skiprows);glGetIntegerv(GL_UNPACK_SKIP_PIXELS,&s->skippixels);
@@ -194,7 +199,7 @@ static void bridge_save(Bridge *s) {
 static void enable(GLenum c,GLboolean on){if(on)glEnable(c);else glDisable(c);}
 static void bridge_restore(const Bridge *s) {
     glUseProgram(s->program);glBindVertexArray(s->vao);glBindBuffer(GL_ARRAY_BUFFER,s->vbo);
-    for(int i=0;i<2;i++){glActiveTexture(GL_TEXTURE0+i);glBindTexture(GL_TEXTURE_2D,s->tex[i]);}
+    for(int i=0;i<3;i++){glActiveTexture(GL_TEXTURE0+i);glBindTexture(GL_TEXTURE_2D,s->tex[i]);}
     glActiveTexture(s->active);glViewport(s->viewport[0],s->viewport[1],s->viewport[2],s->viewport[3]);
     glScissor(s->scissor[0],s->scissor[1],s->scissor[2],s->scissor[3]);
     glPixelStorei(GL_UNPACK_ALIGNMENT,s->unpack);glPixelStorei(GL_UNPACK_ROW_LENGTH,s->row);
@@ -215,8 +220,10 @@ static const char *vs =
     "void main(){gl_Position=pos;W=wp;U=uv;D=darkness;}";
 static const char *fs =
     "#version 300 es\nprecision highp float;precision highp usampler2D;\n"
-    "uniform usampler2D indices;uniform sampler2D pal;uniform int cutout,emissive,receivers;"
-    "uniform vec4 lights[2],colors[2];uniform vec3 ambient;uniform float gammaExponent;"
+    "uniform usampler2D indices,maskTex;uniform sampler2D pal;"
+    "uniform int cutout,emissive,receivers,generated,maskRow,genCount;"
+    "uniform vec4 lights[4],colors[4],maskPlanes[64];uniform ivec4 maskCounts[4];"
+    "uniform vec3 ambient;uniform float gammaExponent;"
     "in vec3 W;in vec2 U;in float D;out vec4 result;"
     "void main(){ivec2 sz=textureSize(indices,0);"
     "ivec2 tc=ivec2(floor(fract(U)*vec2(sz)));"
@@ -224,11 +231,20 @@ static const char *fs =
     "vec3 encoded=texelFetch(pal,ivec2(int(idx),0),0).rgb;"
     "vec3 base=pow(encoded,vec3(2.2));"
     "float s=pow(clamp(1.0-D/16.0,0.0,1.0),2.0);"
-    "vec3 illumination=(receivers!=0?ambient:vec3(1.0))*s;"
-    "for(int j=0;j<2;j++){if((receivers&(1<<j))!=0){"
+    "vec3 illumination=(generated!=0?ambient:(receivers!=0?ambient:vec3(1.0)))*s;"
+    "if(generated!=0){for(int j=0;j<4;j++){if(j>=genCount)break;"
+    "bool permitted=true;if(maskCounts[j].w==2){permitted=false;"
+    "for(int p=0;p<2;p++){if(p>=maskCounts[j].x)break;bool inside=true;"
+    "int count=p==0?maskCounts[j].y:maskCounts[j].z;"
+    "for(int e=0;e<8;e++){if(e<count&&dot(vec4(W,1.0),maskPlanes[j*16+p*8+e])<0.0)inside=false;}"
+    "permitted=permitted||inside;}}"
+    "if(permitted){float a=max(0.0,1.0-distance(W,lights[j].xyz)/lights[j].w);"
+    "illumination+=colors[j].rgb*colors[j].a*a*a;}}}"
+    "else{for(int j=0;j<2;j++){if((receivers&(1<<j))!=0){"
     "float a=max(0.0,1.0-distance(W,lights[j].xyz)/lights[j].w);"
-    "illumination+=colors[j].rgb*colors[j].a*a*a;}}"
-    "bool selflit=idx==1u||(idx>=3u&&idx<=7u)||(idx>=11u&&idx<=31u);"
+    "illumination+=colors[j].rgb*colors[j].a*a*a;}}}"
+    "bool selflit=maskRow>=0?texelFetch(maskTex,ivec2(int(idx),maskRow),0).r!=0u:"
+    "(idx==1u||(idx>=3u&&idx<=7u)||(idx>=11u&&idx<=31u));"
     "vec3 linear=(emissive!=0||selflit)?base:base*illumination;"
     "result=vec4(pow(clamp(linear,0.0,1.0),vec3(gammaExponent/2.2)),1.0);}";
 
@@ -254,8 +270,8 @@ static GLuint shader(GLenum type,const char *source) {
  * renderer's ownership list; the presenter retires that entire owner safely. */
 static void resources_dispose(int lost) {
     retained=ready=0;
-    if(!lost){if(program)glDeleteProgram(program);glDeleteVertexArrays(1,&vao);glDeleteBuffers(1,&vbo);glDeleteTextures(1,&palette);glDeleteRenderbuffers(1,&depth);}
-    program=vao=vbo=palette=depth=0;
+    if(!lost){if(program)glDeleteProgram(program);glDeleteVertexArrays(1,&vao);glDeleteBuffers(1,&vbo);glDeleteTextures(1,&palette);glDeleteTextures(1,&mask_texture);glDeleteRenderbuffers(1,&depth);}
+    program=vao=vbo=palette=mask_texture=depth=0;uploaded_masks_level=-1;
     for(int i=0;i<MAX_TEXTURES;i++){if(!lost)glDeleteTextures(1,&texture_gl[i]);texture_gl[i]=0;texture_retired[i]=0;}
     if(world&&!lost)SDL_DestroyTexture(world);world=NULL;uploaded_palette=0;
 }
@@ -278,7 +294,7 @@ static int initialize(void) {
         glGenVertexArrays(1,&vao);glBindVertexArray(vao);glGenBuffers(1,&vbo);glBindBuffer(GL_ARRAY_BUFFER,vbo);
         const int sizes[]={4,3,2,1};const size_t offsets[]={0,4,7,9};
         for(int i=0;i<4;i++){glEnableVertexAttribArray(i);glVertexAttribPointer(i,sizes[i],GL_FLOAT,GL_FALSE,sizeof(Vertex),(void*)(offsets[i]*sizeof(float)));}
-        glGenTextures(1,&palette);glGenRenderbuffers(1,&depth);
+        glGenTextures(1,&palette);glGenTextures(1,&mask_texture);glGenRenderbuffers(1,&depth);
     }
     bridge_restore(&state);
     if(!ok){failure="shader compilation/link failure";return 0;}
@@ -328,6 +344,38 @@ static float clut_darkness(const unsigned char *clut) {
     if(c<b||c>=b+4096||((c-b)&255)){gpu_world_reject("non-original CLUT");return 0;}
     return (float)(c-b)/256.f;
 }
+static uint32_t map_geometry_key(const MapElem *m){
+    return (uint32_t)me_tiletype(m)|((uint32_t)me_height_flr(m)<<6)|
+        ((uint32_t)me_height_ceil(m)<<11)|((uint32_t)me_param(m)<<16)|
+        ((uint32_t)me_bits_mirror(m)<<24);
+}
+static void generated_prepare(void){
+    generated_active=0;
+    int level=player_struct.level;
+    if(level!=generated_level){
+        gg_profile_free(generated_profile);generated_profile=NULL;
+        generated_level=level;generated_load_attempted=0;
+    }
+    if(level!=1&&level!=6)return; /* neutral GPU on every other level */
+    if(!generated_load_attempted){
+        uint64_t start=SDL_GetPerformanceCounter();generated_load_attempted=1;
+        generated_profile=gg_profile_load(level);
+        SDL_Log("GENERATED1 profile level=%d loaded=%d reason=%s load_ms=%.3f lights=%d surfaces=%d policy=portal-crossing-generated-light-disabled",
+            level,generated_profile!=NULL,gg_profile_error(),
+            (SDL_GetPerformanceCounter()-start)*1000./SDL_GetPerformanceFrequency(),
+            generated_profile?generated_profile->light_count:0,
+            generated_profile?generated_profile->surface_count:0);
+    }
+    if(!generated_profile||!global_fullmap||global_fullmap->x_size!=64||global_fullmap->y_size!=64)return;
+    uint32_t keys[4096];
+    for(int y=0;y<64;y++)for(int x=0;x<64;x++)keys[y*64+x]=map_geometry_key(MAP_GET_XY(x,y));
+    generated_active=gg_profile_map_matches(generated_profile,keys);
+    static int mismatch_level=-1;
+    if(!generated_active&&mismatch_level!=level){
+        SDL_Log("GENERATED1 neutral GPU level=%d reason=stale-map-geometry",level);
+        mismatch_level=level;
+    }
+}
 static void metadata(Draw *d) {
     int x=_fdt_x,y=_fdt_y,material=-1;
     if(object_id>=0){x=objs[object_id].loc.x>>8;y=objs[object_id].loc.y>>8;d->emissive=!object_lit;}
@@ -335,6 +383,10 @@ static void metadata(Draw *d) {
         unsigned type=me_tiletype(MAP_GET_XY(x,y));if(type<64)terrain_types|=UINT64_C(1)<<type;}
     d->material_id=material;
     d->surface=object_id>=0?(GpuSurfaceId){0}:current_surface;
+    d->mask_row=generated_active?gg_mask_row(material):-1;
+    d->ambient_tile=(x>=0&&x<64&&y>=0&&y<64)?y*64+x:-1;
+    d->generated_surface=generated_active?gg_profile_find(generated_profile,d->surface):NULL;
+    if(generated_active){d->emissive=object_id>=0&&!object_lit;d->receivers=0;return;}
     const HvTile *tile=medical_profile?hv_region_tile(x,y):NULL;
     if(medical_profile&&!tile&&object_id>=0){if(!(objs[object_id].loc.y&255))tile=hv_region_tile(x,y-1);if(!tile&&!(objs[object_id].loc.x&255))tile=hv_region_tile(x-1,y);}
     /* Authored receiver membership prevents influence in adjacent unrelated
@@ -505,7 +557,7 @@ void gpu_world_surface_clear(void){current_surface=(GpuSurfaceId){0};}
 
 int gpu_world_begin(void) {
     int previous=active;active=0;
-    if(gShockPrefs.doHorrorVisuals!=3)return previous;
+    if(gShockPrefs.doHorrorVisuals!=3&&gShockPrefs.doHorrorVisuals!=4)return previous;
     /* Secondary and picking canvases never own the retained primary commands.
      * In particular a sequential rear view must not discard a primary image
      * after its software world has been replaced by the UI sentinel. */
@@ -525,11 +577,13 @@ int gpu_world_begin(void) {
     }
     /* Geometry support is independent of the optional Medical light fixture.
      * Its signature gates only those authored lights, never normal terrain. */
-    medical_profile=player_struct.level==1;
+    medical_profile=gShockPrefs.doHorrorVisuals==3&&player_struct.level==1;
     for(size_t i=0;medical_profile&&i<hv_medical_tile_count;i++){
         const HvTile *t=&hv_medical_tiles[i];MapElem *m=MAP_GET_XY(t->x,t->y);
         if(me_tiletype(m)!=t->type||me_height_flr(m)!=t->floor_height||me_height_ceil(m)!=t->ceiling_height||loved_textures[me_tmap_wall(m)]!=t->wall||loved_textures[me_tmap_flr(m)]!=t->floor||loved_textures[me_tmap_ceil(m)]!=t->ceiling)medical_profile=0;
     }
+    generated_active=0;
+    if(gShockPrefs.doHorrorVisuals==4)generated_prepare();
     active=1;failed=0;failure=NULL;retained=command_valid=0;ndraw=nvertex=0;object_id=-1;
     gpu_world_surface_clear();++frame;
     qa_animation_begin();
@@ -573,18 +627,67 @@ static int submit(void) {
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER,0);glPixelStorei(GL_UNPACK_ALIGNMENT,1);glPixelStorei(GL_UNPACK_ROW_LENGTH,0);glPixelStorei(GL_UNPACK_SKIP_ROWS,0);glPixelStorei(GL_UNPACK_SKIP_PIXELS,0);
     glActiveTexture(GL_TEXTURE1);glBindTexture(GL_TEXTURE_2D,palette);sampling();
     if(uploaded_palette!=palette_generation){glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA8,256,1,0,GL_RGBA,GL_UNSIGNED_BYTE,palette_rgb);uploaded_palette=palette_generation;}
+    glActiveTexture(GL_TEXTURE2);glBindTexture(GL_TEXTURE_2D,mask_texture);sampling();
+    if(uploaded_masks_level<0){
+        static const unsigned char empty_masks[256*GG_MASKS]={0};
+        glTexImage2D(GL_TEXTURE_2D,0,GL_R8UI,256,GG_MASKS,0,GL_RED_INTEGER,GL_UNSIGNED_BYTE,empty_masks);
+        uploaded_masks_level=0;
+    }
+    if(generated_active&&uploaded_masks_level!=generated_profile->level){
+        glTexImage2D(GL_TEXTURE_2D,0,GL_R8UI,256,GG_MASKS,0,GL_RED_INTEGER,GL_UNSIGNED_BYTE,generated_profile->masks);
+        uploaded_masks_level=generated_profile->level;
+    }
     glUniform1i(glGetUniformLocation(program,"indices"),0);glUniform1i(glGetUniformLocation(program,"pal"),1);
-    glUniform4fv(glGetUniformLocation(program,"lights"),2,light_pos);glUniform4fv(glGetUniformLocation(program,"colors"),2,light_color);
-    glUniform3fv(glGetUniformLocation(program,"ambient"),1,medical_ambient);
+    glUniform1i(glGetUniformLocation(program,"maskTex"),2);
+    glUniform1i(glGetUniformLocation(program,"generated"),generated_active);
+    if(!generated_active){
+        glUniform4fv(glGetUniformLocation(program,"lights"),4,light_pos);
+        glUniform4fv(glGetUniformLocation(program,"colors"),4,light_color);
+        glUniform3fv(glGetUniformLocation(program,"ambient"),1,medical_ambient);
+    }
     float g=fmaxf(.1f,fminf(1.f,gShockPrefs.doGamma/100.f)),exponent=1.f/((1-(1-g)*(1-g))*2.2f);
     glUniform1f(glGetUniformLocation(program,"gammaExponent"),exponent);
     GLint cut=glGetUniformLocation(program,"cutout"),em=glGetUniformLocation(program,"emissive"),rec=glGetUniformLocation(program,"receivers");
+    GLint row=glGetUniformLocation(program,"maskRow"),gen_count=glGetUniformLocation(program,"genCount");
+    GLint light_loc=glGetUniformLocation(program,"lights"),color_loc=glGetUniformLocation(program,"colors");
+    GLint ambient_loc=glGetUniformLocation(program,"ambient"),counts_loc=glGetUniformLocation(program,"maskCounts");
+    GLint planes_loc=glGetUniformLocation(program,"maskPlanes");
+    generated_draws=generated_refs=generated_max_refs=generated_partials=0;
     glActiveTexture(GL_TEXTURE0);
     for(int i=0;i<ndraw;i++){
         Draw *d=&draws[i];GwTextureEntry *t=&texture_cache.entries[d->texture];GLuint *name=&texture_gl[d->texture];
         if(!*name){glGenTextures(1,name);glBindTexture(GL_TEXTURE_2D,*name);sampling();glTexImage2D(GL_TEXTURE_2D,0,GL_R8UI,t->w,t->h,0,GL_RED_INTEGER,GL_UNSIGNED_BYTE,t->pixels);++uploads;upload_bytes+=t->w*t->h;}
         else glBindTexture(GL_TEXTURE_2D,*name);
-        glUniform1i(cut,d->cutout);glUniform1i(em,d->emissive);glUniform1i(rec,d->receivers);glDrawArrays(GL_TRIANGLES,d->first,d->count);
+        glUniform1i(cut,d->cutout);glUniform1i(em,d->emissive);glUniform1i(rec,d->receivers);
+        glUniform1i(row,d->mask_row);
+        if(generated_active){
+            float positions[16]={0},colors[16]={0},planes[64*4]={0};
+            GLint counts[16]={0};
+            int n=d->generated_surface?d->generated_surface->count:0,plane_end=0;
+            const float *ambient=gg_profile_ambient(generated_profile,d->ambient_tile);
+            glUniform3fv(ambient_loc,1,ambient);
+            for(int j=0;j<n;j++){
+                const GgReceiver *r=&d->generated_surface->lights[j];
+                const GgLight *l=&generated_profile->lights[r->light_index];
+                memcpy(positions+j*4,l->position,3*sizeof(float));positions[j*4+3]=l->radius;
+                memcpy(colors+j*4,l->rgb,3*sizeof(float));colors[j*4+3]=l->intensity;
+                counts[j*4]=r->polygons;counts[j*4+1]=r->plane_counts[0];
+                counts[j*4+2]=r->plane_counts[1];counts[j*4+3]=r->kind;
+                if(r->kind==2)generated_partials++;
+                for(int p=0;p<r->polygons;p++)for(int e=0;e<r->plane_counts[p];e++){
+                    int slot=j*16+p*8+e;
+                    memcpy(planes+slot*4,r->planes[p][e],4*sizeof(float));
+                    if(slot+1>plane_end)plane_end=slot+1;
+                }
+            }
+            glUniform1i(gen_count,n);
+            if(n){glUniform4fv(light_loc,4,positions);glUniform4fv(color_loc,4,colors);
+                glUniform4iv(counts_loc,4,counts);
+                if(plane_end)glUniform4fv(planes_loc,plane_end,planes);}
+            generated_draws++;generated_refs+=(unsigned)n;
+            if((unsigned)n>generated_max_refs)generated_max_refs=(unsigned)n;
+        }
+        glDrawArrays(GL_TRIANGLES,d->first,d->count);
     }
     GLenum error=glGetError();bridge_restore(&state);SDL_SetRenderTarget(renderer,old);
     if(inject("submit"))error=GL_OUT_OF_MEMORY;
@@ -633,6 +736,10 @@ void gpu_world_end(int previous) {
             for(int y=0;y<_fr->draw_canvas.bm.h;y++)memset(_fr->draw_canvas.bm.bits+y*_fr->draw_canvas.bm.row,255,_fr->draw_canvas.bm.w);
             if(frame==1||frame%300==0||diagnostic_due||logged_level!=player_struct.level){double ms=1000./SDL_GetPerformanceFrequency();SDL_Log("GPU1B LIVE frame=%u draws=%d triangles=%d capture_with_software_ms=%.3f submit_cpu_ms=%.3f uploads=%u bytes=%u palette_generation=%u fallbacks=%u GPU_execution_ms=unknown lights_z=%g,%g viewport=%d,%d,%d,%d",frame,ndraw,nvertex/3,(capture_end-capture_start)*ms,(SDL_GetPerformanceCounter()-capture_end)*ms,uploads,upload_bytes,palette_generation,fallbacks,light_pos[2],light_pos[6],destination.x,destination.y,destination.w,destination.h);}
             if(frame==1||frame%300==0||diagnostic_due||logged_level!=player_struct.level)SDL_Log("GPU2 CACHE level=%d camera=%g,%g,%g heading=%g pitch=%g types=%llx entries=%u bytes=%zu peak_bytes=%zu hits=%llu misses=%llu evictions=%llu rejections=%llu",player_struct.level,fr_camera_last[0]/65536.,fr_camera_last[1]/65536.,fr_camera_last[2]/65536.,fr_camera_last[3]/256.,fr_camera_last[4]/256.,(unsigned long long)terrain_types,texture_cache.resident_count,texture_cache.resident_bytes,texture_cache.high_water_bytes,(unsigned long long)texture_cache.hits,(unsigned long long)texture_cache.misses,(unsigned long long)texture_cache.evictions,(unsigned long long)texture_cache.rejections);
+            if(generated_active&&(frame==1||frame%300==0||diagnostic_due||logged_level!=player_struct.level))
+                SDL_Log("GENERATED1 frame=%u level=%d draws=%u refs=%u mean_refs=%.3f max_refs=%u partial_relations=%u portal-crossing-generated-light-disabled",
+                    frame,player_struct.level,generated_draws,generated_refs,
+                    generated_draws?(double)generated_refs/generated_draws:0.,generated_max_refs,generated_partials);
         }
     }
     if(active&&!failed){diagnostic_due=0;logged_level=player_struct.level;}
@@ -677,7 +784,7 @@ void gpu_world_presenter_lost(void) {
     gShockPrefs.doHorrorVisuals=0;
 }
 int gpu_world_compose(void) {
-    if(gShockPrefs.doHorrorVisuals!=3||!command_valid||UseCutscenePalette||(_current_loop!=GAME_LOOP&&_current_loop!=FULLSCREEN_LOOP))return 0;
+    if((gShockPrefs.doHorrorVisuals!=3&&gShockPrefs.doHorrorVisuals!=4)||!command_valid||UseCutscenePalette||(_current_loop!=GAME_LOOP&&_current_loop!=FULLSCREEN_LOOP))return 0;
     /* Retained commands include owned pixels and copied vertices: rebuild a
      * paused view after reset/foreground without re-running simulation/traversal.
      * Palette cycling can update that same view without re-uploading indexed art. */

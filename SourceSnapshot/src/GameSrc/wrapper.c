@@ -1850,7 +1850,7 @@ void gamma_slider_dealfunc(ushort gamma_qvar) {
 extern void horror_visuals_set_mode(int mode);
 static void visuals_button_draw(uchar butid) {
     char label[48];
-    strcpy(label,gShockPrefs.doHorrorVisuals==3 ? "GPU\nPROTOTYPE" : gShockPrefs.doHorrorVisuals==2 ? "VIS1B\nHORROR" :
+    strcpy(label,gShockPrefs.doHorrorVisuals==4 ? "GPU\nGENERATED" : gShockPrefs.doHorrorVisuals==3 ? "GPU\nPROOF" : gShockPrefs.doHorrorVisuals==2 ? "VIS1B\nHORROR" :
                  gShockPrefs.doHorrorVisuals==1 ? "VIS1\nCONSERVATIVE" : "VISUALS\nORIGINAL");
     text_button(label,BR(butid).ul.x,BR(butid).ul.y,BUTTON_COLOR,BUTTON_SHADOW,
                 BR(butid).ul.x-BR(butid).lr.x,BR(butid).ul.y-BR(butid).lr.y);
@@ -1858,7 +1858,9 @@ static void visuals_button_draw(uchar butid) {
 static void visuals_button_toggle(uchar butid) {
     (void)butid;
     #ifdef RP5NP_GPU_WORLD
-    horror_visuals_set_mode((gShockPrefs.doHorrorVisuals+1)%4);
+    /* Keep Conservative available after the main review sequence. */
+    int mode=gShockPrefs.doHorrorVisuals;
+    horror_visuals_set_mode(mode==0?2:mode==2?3:mode==3?4:mode==4?1:0);
 #else
     horror_visuals_set_mode((gShockPrefs.doHorrorVisuals+1)%3);
 #endif

@@ -135,7 +135,7 @@ int horror_visuals_light(int permanent, int transient, int ceiling, int x, int y
 }
 void horror_visuals_set_mode(int mode) {
 #ifdef RP5NP_GPU_WORLD
-    gShockPrefs.doHorrorVisuals=mode>=0 && mode<=3 ? mode : 0;
+    gShockPrefs.doHorrorVisuals=mode>=0 && mode<=4 ? mode : 0;
 #else
     gShockPrefs.doHorrorVisuals=mode>=0 && mode<=2 ? mode : 0;
 #endif
@@ -144,7 +144,7 @@ void horror_visuals_set_mode(int mode) {
 #endif
     SavePrefs();
     SDL_Log("VIS1 mode=%s; applies at next world draw; gamma=%d",
-            mode==3 ? "GPU PROTOTYPE" : mode==2 ? "VIS1B HORROR" : mode==1 ? "VIS1 CONSERVATIVE" : "ORIGINAL",gShockPrefs.doGamma);
+            mode==4 ? "GPU GENERATED" : mode==3 ? "GPU PROOF" : mode==2 ? "VIS1B HORROR" : mode==1 ? "VIS1 CONSERVATIVE" : "ORIGINAL",gShockPrefs.doGamma);
 }
 
 uint64_t horror_visuals_clock(void) {

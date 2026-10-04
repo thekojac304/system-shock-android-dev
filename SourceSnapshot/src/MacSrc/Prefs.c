@@ -199,6 +199,7 @@ int16_t LoadPrefs(void) {
         if (strcasecmp(key, "world-visuals") == 0) {
             gShockPrefs.doHorrorVisuals =
 #ifdef RP5NP_GPU_WORLD
+                strcasecmp(value, "gpu-generated") == 0 ? 4 :
                 strcasecmp(value, "gpu-prototype") == 0 ? 3 :
 #endif
                 strcasecmp(value, "horror") == 0 ? 2 :
@@ -311,7 +312,7 @@ int16_t SavePrefs(void) {
     fprintf(f, "%s = %d\n", PREF_TEX_FILTER, gShockPrefs.doTextureFilter);
     fprintf(f, "%s = %s\n", PREF_ONSCR_HELP, gShockPrefs.goOnScreenHelp ? "yes" : "no");
     fprintf(f, "%s = %d\n", PREF_GAMMA, gShockPrefs.doGamma);
-    fprintf(f, "world-visuals = %s\n", gShockPrefs.doHorrorVisuals == 3 ? "gpu-prototype" : gShockPrefs.doHorrorVisuals == 2 ? "horror" :
+    fprintf(f, "world-visuals = %s\n", gShockPrefs.doHorrorVisuals == 4 ? "gpu-generated" : gShockPrefs.doHorrorVisuals == 3 ? "gpu-prototype" : gShockPrefs.doHorrorVisuals == 2 ? "horror" :
             gShockPrefs.doHorrorVisuals == 1 ? "enhanced" : "original");
     fprintf(f, "%s = %d\n", PREF_MSG_LENGTH, gShockPrefs.goMsgLength);
     fprintf(f, "%s = %d\n", PREF_ALOG_SETTING, audiolog_setting);

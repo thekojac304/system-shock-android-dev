@@ -82,6 +82,7 @@ endif()
 if(RP5NP_QA_TOOLS)
     target_sources(main PRIVATE
         "${RP5NP_SHOCKOLATE_SOURCE_DIR}/src/MacSrc/GpuWorld.c"
+        "${RP5NP_SHOCKOLATE_SOURCE_DIR}/src/MacSrc/GpuGenerated.c"
         "${RP5NP_SHOCKOLATE_SOURCE_DIR}/src/MacSrc/GpuTextureCache.c")
     target_link_libraries(main GLESv3 EGL)
     foreach(gpu_consumer main GAME_LIB 3D_LIB INPUT_LIB)

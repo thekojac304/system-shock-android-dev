@@ -25,6 +25,26 @@ if (-not $AndroidSdk) {
 
 & $Preflight -Variant $Variant -AndroidSdk $AndroidSdk -JavaHome $JavaHome -DepsRoot $DepsRoot -SkipGitCleanCheck:$SkipGitCleanCheck
 
+# The QA generated-light assets are compiled from the user's ignored, owned
+# archive and accepted diagnostics. Never package a stale prior compilation.
+if ($Variant -eq 'qa') {
+    $GeneratedInputs = @(
+        (Join-Path $Root 'dist\audio2\owned-ARCHIVE.DAT'),
+        (Join-Path $Root 'dist\horror-author1d\generated\level-1.generated.json'),
+        (Join-Path $Root 'dist\horror-author1d\generated\level-6.generated.json'),
+        (Join-Path $Root 'dist\horror-author1e\level-1.partial.json'),
+        (Join-Path $Root 'dist\horror-author1e\level-6.partial.json')
+    )
+    $GeneratedAssets = Join-Path $Root 'AndroidProject\app\src\qa\assets\horror-generated'
+    $InputsPresent = @($GeneratedInputs | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf }).Count
+    if ($InputsPresent -eq $GeneratedInputs.Count) {
+        & python (Join-Path $Root 'scripts\compile-horror-generated.py')
+        if ($LASTEXITCODE -ne 0) { throw 'Generated-light profile compilation failed.' }
+    } elseif (Test-Path -LiteralPath $GeneratedAssets) {
+        throw 'Generated-light assets exist without all accepted input files; refusing a stale QA package.'
+    }
+}
+
 $Sdl = Join-Path $DepsRoot 'SDL2'
 $Mixer = Join-Path $DepsRoot 'SDL2_mixer'
 
