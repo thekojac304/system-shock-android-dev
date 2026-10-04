@@ -194,7 +194,7 @@ def load_level(res, level, props):
         obj=dict(id=oid,obclass=o[1],subclass=o[2],type=o[20+pad],
             spec_id=struct.unpack_from('<H',o,3+pad)[0],
             position=[x/256,y/256,o[15+pad]/2**(3+zshift)],
-            tile=(y//256)*w+x//256,heading=o[17+pad],
+            tile=(y//256)*w+x//256,pitch=o[16+pad],heading=o[17+pad],bank=o[18+pad],
             hp=struct.unpack_from('<h',o,21+pad)[0],frame=o[24+pad],flags=o[26+pad])
         obj['triple']=(obj['obclass']<<16)|(obj['subclass']<<8)|obj['type']
         if obj['obclass'] in (9,10,12):
@@ -231,26 +231,133 @@ def neighbors(i,tiles):
 
 
 def door_portals(data):
-    """Boundary-mounted doors block an edge; ambiguous interior doors fail closed."""
+    """Match the engine's one-tile door collision plane to a terrain edge.
+
+    faceobj.c uses +/-0.5 map units along its local X axis. doorparm.h
+    considers frames 0..2 closed; partial frames therefore never transmit.
+    The changing bitmap silhouette is deliberately not approximated.
+    """
     tiles=data['tiles'];portals=[];blocked=set();ambiguous=set()
+    objects={o['id']:o for o in data['objects']}
+    # A panel is two-sided: heading and heading+128 have the same plane.
+    heading_edges={0:(0,2),128:(0,2),64:(1,3),192:(1,3)}
     for o in data['objects']:
         if 'door' not in o:continue
         i=o['tile'];t=tiles.get(i)
         if t is None:continue
         x,y=o['position'][:2];fx=x-math.floor(x);fy=y-math.floor(y)
-        distances=(fy,1-fx,1-fy,fx);edge=min(range(4),key=lambda k:distances[k])
+        distances=(fy,1-fx,1-fy,fx)
+        candidates=heading_edges.get(o.get('heading'),range(4))
+        edge=min(candidates,key=lambda k:distances[k])
         dx,dy=DIRECTIONS[edge];j=(t['y']+dy)*64+t['x']+dx
-        if distances[edge]>.1 or j not in tiles or not open_aperture(t,tiles[j],edge):
+        oriented=o.get('heading') in heading_edges and not o.get('pitch',0) and not o.get('bank',0)
+        other=o['door'].get('other_half',0)
+        partner=objects.get(other) if other else None
+        partner_valid=not other or bool(partner and 'door' in partner)
+        object_ids=[o['id']]+([other] if other and partner_valid else [])
+        initial_frames={str(oid):objects[oid].get('frame',0) for oid in object_ids}
+        common=dict(id=f'L{data["level_id"]}:P{o["id"]}',object_id=o['id'],
+            object_ids=object_ids,position=o['position'],
+            heading=o.get('heading'),other_half=other,initial_frames=initial_frames,
+            default='open' if all(frame>=3 for frame in initial_frames.values()) else 'closed',
+            runtime_gate='current_frame>=3;paired_halves_all_open',
+            partial_open_policy='blocked_frames_0_1_2',panel_width=1.0,
+            panel_width_source='faceobj.c fixed collision face +/-0.5 map units',
+            opening_direction='bitmap_animation_unresolved')
+        if not partner_valid or not oriented or distances[edge]>.01 or j not in tiles or not open_aperture(t,tiles[j],edge):
             ambiguous.add(i)
-            portals.append(dict(object_id=o['id'],tiles=[i],edge=None,position=o['position'],
-                heading=o.get('heading'),other_half=o['door'].get('other_half',0),default='closed',
-                runtime_gate='door_frame',confidence='unresolved_interior_or_geometry'))
+            portals.append(dict(**common,tiles=[i],edge=None,plane=None,edge_plane=None,
+                panel_span=None,aperture_span=None,world_aperture_span=None,
+                confidence='unresolved_interior_or_geometry'))
             continue
         pair=tuple(sorted((i,j)));blocked.add(pair)
-        portals.append(dict(object_id=o['id'],tiles=list(pair),edge=edge,position=o['position'],
-            heading=o.get('heading'),other_half=o['door'].get('other_half',0),default='closed',
-            runtime_gate='door_frame',confidence='boundary_aperture_extent_unverified'))
+        a=FACES[t['type']][edge];b=FACES[tiles[j]['type']][(edge+2)%4]
+        lo=max(PT_OFFSETS[(a>>3)&7],1-PT_OFFSETS[b&7]);hi=min(PT_OFFSETS[a&7],1-PT_OFFSETS[(b>>3)&7])
+        center=fx if edge in (0,2) else fy
+        lo=max(lo,center-.5);hi=min(hi,center+.5)
+        if hi-lo<.04:
+            ambiguous.add(i)
+            portals.append(dict(**common,tiles=[i],edge=None,plane=None,edge_plane=None,
+                panel_span=None,aperture_span=None,world_aperture_span=None,
+                confidence='no_panel_aperture_overlap'))
+            continue
+        edge_plane=t['y']+(edge==2) if edge in (0,2) else t['x']+(edge==1)
+        origin=t['x'] if edge in (0,2) else t['y']
+        portals.append(dict(**common,tiles=list(pair),edge=edge,
+            plane=y if edge in (0,2) else x,edge_plane=edge_plane,
+            panel_span=[center-.5,center+.5],aperture_span=[lo,hi],
+            world_aperture_span=[origin+lo,origin+hi],
+            confidence='collision_plane_and_static_aperture'))
     return portals,blocked,ambiguous
+
+
+def portal_transmits(portal,frames):
+    """Conservative live state: no transmission during partial opening."""
+    return portal['edge'] is not None and all(frames.get(i,0)>=3 for i in portal['object_ids'])
+
+
+def receiver_face_audit(profile,only_tiles=None):
+    """Count fully versus partly visible flat floor/ceiling receivers.
+
+    This is an offline risk audit, not a per-fragment proof or draw identity.
+    Complex tile shapes and wall draws remain unverified.
+    """
+    tiles={t['id']:t for t in profile['diagnostics']['tiles']}
+    member={i:t['region'] for i,t in tiles.items()}
+    portals=profile['diagnostics']['door_portals']
+    blocked={tuple(sorted(p['tiles'])) for p in portals if p['edge'] is not None}
+    ambiguous={p['tiles'][0] for p in portals if p['edge'] is None}
+    counts=Counter();examples=[];full_faces=set();partial_faces=set();any_faces=set()
+    for light in profile['lights']:
+        for i in light['receiver_tiles']:
+            if only_tiles is not None and i not in only_tiles:continue
+            t=tiles[i]
+            if t['type']!=1:
+                counts['complex_receiver_light_tiles']+=1
+                continue
+            for face in ('floor','ceiling'):
+                z=t[face]+(.02 if face=='floor' else -.02)
+                visible=[visible_receiver(light['position'],[t['x']+sx,t['y']+sy,z],
+                    tiles,member,member[i],ambiguous,blocked)
+                    for sx in (.02,.5,.98) for sy in (.02,.5,.98)]
+                state='full' if all(visible) else 'partial' if any(visible) else 'none'
+                counts[face+'_'+state]+=1
+                if state!='none':any_faces.add((i,face))
+                if state=='full':full_faces.add((i,face))
+                if state=='partial':partial_faces.add((i,face))
+                if state=='partial' and len(examples)<8:examples.append(dict(light=light['id'],tile=i,face=face))
+    target=tiles.values() if only_tiles is None else (tiles[i] for i in only_tiles if i in tiles)
+    flat_target_faces=2*sum(t['type']==1 for t in target)
+    return dict(counts=dict(sorted(counts.items())),flat_target_faces=flat_target_faces,
+        unique_full_faces=len(full_faces),unique_partial_faces=len(partial_faces),
+        unique_any_faces=len(any_faces),partial_examples=examples,
+        limitation='Nine samples are not fragment proof; wall/complex draws lack stable surface identity.')
+
+
+def emissive_mask_audit(texture_bytes,rules):
+    """Check reviewed source-index masks against the original owned texture file."""
+    if digest(texture_bytes)!=rules['reviewed_texture_sha256']:
+        raise ValueError('Reviewed emissive masks require the exact TEXTURE.RES source')
+    resources=ARCHIVE(texture_bytes,1000,1363);result={}
+    housing={20:{206,207,222,223},35:{108,109},36:{108,109},
+        82:{69,70,71,72,73},101:{213,214,215,216},
+        144:{217,218,219},185:{189,190,191,223},
+        215:{189,190,191},216:{189,190,191},217:{217,218,219,220,221}}
+    for key,indices in sorted(rules['reviewed_emissive_indices'].items(),key=lambda v:int(v[0])):
+        tid=int(key);raw=resources[1000+tid];offset=int.from_bytes(raw[2:6],'little')
+        frame=raw[offset:];w=int.from_bytes(frame[8:10],'little');height=int.from_bytes(frame[10:12],'little')
+        pixels=frame[28:28+w*height];mask=set(indices)
+        if (w,height)!=(128,128) or len(pixels)!=w*height or mask&housing[tid]:
+            raise ValueError('Invalid reviewed emissive texture or housing mask')
+        def share(x0,y0,x1,y1):
+            return sum(pixels[y*w+x] in mask for y in range(y0,y1) for x in range(x0,x1))/((x1-x0)*(y1-y0))
+        center=share(32,32,96,96);top=share(0,0,128,16)
+        selected=sum(px in mask for px in pixels)
+        housing_pixels=sum(px in housing[tid] for px in pixels)
+        if selected<100 or housing_pixels<100:raise ValueError('Emissive/housing pixel evidence missing')
+        result[key]=dict(center_selected_fraction=round(center,4),top_selected_fraction=round(top,4),
+            selected_pixels=selected,housing_pixels=housing_pixels,total_pixels=len(pixels))
+    return result
 
 
 def segment(data):
@@ -370,6 +477,8 @@ def apply_overlay(profile,overlay):
 def generate(data,props,rules,objprops=None):
     tiles=data['tiles'];level=data['level_id'];regions,member,adjacency,edges=segment(data)
     portals,blocked,door_tiles=door_portals(data)
+    for portal in portals:
+        portal['connected_regions']=sorted({member[i] for i in portal['tiles']})
     classes={tid:kind for kind,ids in rules['classes'].items() for tid in ids}
     archetype=copy.deepcopy(rules['archetypes'][str(level)])
     candidates=[];lights=[];warnings=[]
@@ -476,20 +585,23 @@ def generate(data,props,rules,objprops=None):
     materials=[dict(id=f'texture:{tid}',origin='generated',resource_id=tid,family_id=props[tid]['family_texture'],
         animation_group=props[tid]['anim_group'],animation_position=props[tid]['group_pos'],
         classification=classes.get(tid,'unknown'),emissive=False,
+        emissive_indices=rules.get('reviewed_emissive_indices',{}).get(str(tid),[]),
         emissive_gain=1.,grading_policy='preserve_original_art',
         local_light_policy='surface_aware' if classes.get(tid)=='luminous_fixture' else 'none',
         surface_emission={face:emission_policy(rules,classes.get(tid,'unknown'),tid,face)
             for face in ('ceiling','floor','wall')},
-        special_handling='sky_excluded' if props[tid]['force_dir'] else 'pixel_mask_review') for tid in sorted(set(data['texture_ids']))]
+        special_handling='sky_excluded' if props[tid]['force_dir'] else
+            'reviewed_source_index_mask' if str(tid) in rules.get('reviewed_emissive_indices',{}) else
+            'pixel_mask_review') for tid in sorted(set(data['texture_ids']))]
     warnings.extend(['DIAGNOSTIC ONLY: no runtime loader or visual acceptance.',
         'Face-table apertures and sloped edge heights model static optical connections; internal complex walls remain unresolved.',
         'Receiver tiles use five samples; fragment-safe masks and dynamic invalidation required before runtime.',
         'All door portals block generated light; open-door spill is not implemented.',
-        'Mixed material pixels remain non-emissive until reviewed source-index masks exist.',
+        'Only ten reviewed fixture textures carry source-index emissive masks; other mixed art remains non-emissive.',
         'No automatic fog enabled; no generic power/alarm/SHODAN color state invented.',
         'Fullbright render flags and UNLIT instances are inventoried, not universal light emitters.'])
     if objprops is None:warnings.append('OBJPROP omitted: generic TEXTPOLY display and unlit detection unavailable.')
-    p=dict(schema_version=VERSION,generator_version='horror-author1b.1',origin='generated',
+    p=dict(schema_version=VERSION,generator_version='horror-author1c.1',origin='generated',
         level_id=level,baseline_signature=data['signature'],rules_signature=digest(encode(rules)),
         texture_properties_signature=digest(encode(props)),
         object_properties_signature=digest(encode(objprops)) if objprops is not None else None,
@@ -544,6 +656,11 @@ def validate(p):
             raise ValueError('Receiver outside region')
         budget.update(set(light['receiver_tiles']))
     if max(budget.values(),default=0)>4:raise ValueError('Receiver light budget exceeded')
+    for material in p['material_rules']:
+        mask=material['emissive_indices']
+        if (material['emissive'] and mask or mask and material['special_handling']!='reviewed_source_index_mask' or
+                len(mask)!=len(set(mask)) or any(type(i)!=int or not 0<=i<=255 for i in mask)):
+            raise ValueError('Invalid emissive source-index mask')
     targets=set(regions)|{x['id'] for x in p['lights']}|{x['id'] for x in p['material_rules']}
     for override in p['dynamic_overrides']:
         if any(target not in targets for target in override['targets']):raise ValueError('Unknown dynamic target')

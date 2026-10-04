@@ -82,7 +82,10 @@ class InferenceTests(unittest.TestCase):
             if p['lights']:self.assertLess(p['lights'][0]['intensity'],.5)
             self.assertFalse(p['defaults']['fog']['enabled'])
         p=self.profile()
-        self.assertFalse(next(m for m in p['material_rules'] if m['resource_id']==35)['emissive'])
+        mask=next(m for m in p['material_rules'] if m['resource_id']==35)
+        self.assertFalse(mask['emissive'])  # Whole-texture glow remains forbidden.
+        self.assertEqual(mask['emissive_indices'],[100,101,102,103])
+        self.assertNotIn(108,mask['emissive_indices'])
         wall=h.generate(data([tile(2,2,textures={'wall':35,'floor':37,'ceiling':37})]),self.props,self.rules)
         self.assertEqual(len(wall['lights']),1)
         self.assertLess(wall['lights'][0]['intensity'],.5)
@@ -101,10 +104,38 @@ class InferenceTests(unittest.TestCase):
             heading=0,obclass=10,subclass=0,type=0,triple=0xa0000)
         d=data(ts,[door]);portals,blocked,ambiguous=h.door_portals(d)
         self.assertEqual(len(blocked),1);self.assertFalse(ambiguous)
-        self.assertEqual(portals[0]['runtime_gate'],'door_frame')
+        self.assertEqual(portals[0]['runtime_gate'],'current_frame>=3;paired_halves_all_open')
+        self.assertEqual(portals[0]['panel_width'],1.0)
+        self.assertEqual(portals[0]['aperture_span'],[0.,1.])
+        self.assertEqual(portals[0]['plane'],2.996)
+        self.assertEqual(portals[0]['edge_plane'],3)
+        self.assertEqual(portals[0]['world_aperture_span'],[3.,4.])
+        self.assertFalse(h.portal_transmits(portals[0],{9:2}))
+        self.assertTrue(h.portal_transmits(portals[0],{9:3}))
         r,m,_,_=h.segment(d);self.assertEqual(len(r),2)
         self.assertFalse(h.visible_receiver([3.5,2.5,1],[3.5,3.5,1],d['tiles'],m,'x',ambiguous,blocked))
         self.assertTrue(h.visible_receiver([3.5,2.5,1],[3.5,3.5,1],d['tiles'],m,'x'))
+
+    def test_door_heading_mismatch_and_paired_state_fail_closed(self):
+        ts=[tile(3,y) for y in (2,3)]
+        door=dict(id=9,tile=131,door={'other_half':10},position=[3.5,2.996,1.],
+            heading=0,obclass=10,subclass=0,type=0,triple=0xa0000)
+        partner=dict(door,id=10,door={'other_half':9})
+        portal=h.door_portals(data(ts,[door,partner]))[0][0]
+        self.assertFalse(h.portal_transmits(portal,{9:3,10:2}))
+        self.assertTrue(h.portal_transmits(portal,{9:3,10:3}))
+        door['heading']=64
+        invalid=h.door_portals(data(ts,[door,partner]))[0][0]
+        self.assertIsNone(invalid['edge'])
+        self.assertFalse(h.portal_transmits(invalid,{9:3,10:3}))
+
+    def test_hidden_fragment_counterexample_and_mask_signature(self):
+        ts=[tile(x,y) for x in range(2,7) for y in range(2,7) if (x,y)!=(2,4)]
+        d=data(ts);members={i:'r' for i in d['tiles']}
+        source=[2.5,2.5,1.]
+        self.assertTrue(h.visible_receiver(source,[3.5,4.5,1.],d['tiles'],members,'r'))
+        self.assertFalse(h.visible_receiver(source,[3.1,4.9,1.],d['tiles'],members,'r'))
+        with self.assertRaises(ValueError):h.emissive_mask_audit(b'wrong texture source',self.rules)
 
     def test_slope_fixture_and_text_bitmap_detection(self):
         d=data([tile(2,2,type=6,param=4,mirror=3,ceiling=2.)]);p=h.generate(d,self.props,self.rules)

@@ -28,7 +28,7 @@ def holdout_map(p,reference,bounds=(24,18,33,27),scale=42):
     rec=Counter(i for l in p['lights'] for i in l['receiver_tiles'])
     suppressed=Counter(c['tile'] for c in p['diagnostics']['candidates'] if c['policy'].startswith('suppressed'))
     portals=p['diagnostics'].get('door_portals',[])
-    draw.text((20,14),'AUTHOR1B Medical Healing Suite | offline inference; white outlines = held-out reference tiles',fill='white')
+    draw.text((20,14),'AUTHOR1C Medical Healing Suite | offline inference; white outlines = held-out reference tiles',fill='white')
     for panel,title in enumerate(('Inferred regions / portals','Generated receiver masks / sources','Suppressed fixtures / emissive review')):
         ox=20+panel*(pw+20);oy=58;draw.text((ox,38),title,fill='white')
         for y in range(y0,y1):
@@ -151,6 +151,7 @@ def summarize(p):
             luminous_candidates=[c['id'] for c in p['diagnostics']['candidates'] if c['tile'] in reference and c['classification']=='luminous_fixture'],
             generated_lights=[light['id'] for light in p['lights'] if any(i in reference for i in light['receiver_tiles'])],
             reference_tiles_receiving_light=sorted(reference&rec),
+            receiver_face_audit=h.receiver_face_audit(p,reference),
             known_displays_detected={str(oid):any(c['source_object_id']==oid for c in p['diagnostics']['candidates']) for oid in (699,718)},
             note='Reference mask read AFTER generation only. Warm alcove and two proof-light positions are not generator inputs.')
     return result
@@ -167,7 +168,7 @@ def main():
         maps(p).save(args.output/f'level-{level}.overview.png')
         if level==1:
             maps(p,(24,18,33,27),36).save(args.output/'medical-holdout.png')
-            holdout_map(p,set(report[level]['medical_holdout']['reference_tiles'])).save(args.output/'medical-holdout-author1b.png')
+            holdout_map(p,set(report[level]['medical_holdout']['reference_tiles'])).save(args.output/'medical-holdout-author1c.png')
     (args.output/'review.json').write_bytes(h.encode(report))
     print(json.dumps({l:{k:v for k,v in r.items() if k in ('summary','receiver_coverage_percent','region_multitile_coverage_percent','medical_holdout')} for l,r in report.items()},indent=2))
 
