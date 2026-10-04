@@ -93,8 +93,40 @@ static const GpuPostPreset post_presets[] = {
         {.47f,.42f,.38f},3.f,12.f,.080f,.050f,.025f,{.005f,-.010f,.012f},26.f,.003f,
         .55f,.030f,.08f,.88f,1.05f,1.55f,.9f,.045f,.04f,{.45f,.42f,.39f}},
     {"EXEC GOLD",1.01f,1.20f,.05f,.22f,.87f,{.92f,.94f,1.f},{1.08f,.99f,.80f},.07f,.11f,.13f,.72f,.25f,.008f},
-    {"EXEC CORPORATE",1.f,1.16f,.04f,.18f,.91f,{.86f,.94f,1.03f},{1.06f,1.02f,.95f},.11f,.055f,.09f,.75f,.25f,.005f}
+    {"EXEC CORPORATE",1.f,1.16f,.04f,.18f,.91f,{.86f,.94f,1.03f},{1.06f,1.02f,.95f},.11f,.055f,.09f,.75f,.25f,.005f},
+    /* Station-wide Auto archetypes share the Medical/Executive tone philosophy.
+     * Generated-light multipliers remain neutral until reviewed light profiles
+     * exist for these levels; the post grade still selects by deck. */
+    {"REACTOR INDUSTRIAL",1.01f,1.16f,.04f,.16f,.91f,{.98f,.91f,.86f},{1.06f,1.01f,.93f},.08f,.055f,.10f,.74f,.25f,.006f,
+        {.49f,.41f,.35f},2.5f,10.f,.085f,.045f,.03f,{.012f,-.006f,-.008f},23.f,.003f,
+        .38f,.018f,.045f,1.f,1.f,1.55f,.9f,.055f,.05f,{.48f,.40f,.34f}},
+    {"RESEARCH CLINICAL",1.03f,1.11f,.03f,.11f,.96f,{.83f,.98f,1.02f},{.98f,1.04f,1.02f},.08f,.04f,.08f,.74f,.25f,.005f,
+        {.50f,.62f,.63f},2.5f,10.f,.06f,.045f,.02f,{-.012f,.012f,.014f},24.f,.002f,
+        .25f,.012f,.03f,1.f,1.f,0.f,0.f,0.f,0.f,{0.f,0.f,0.f}},
+    {"MAINTENANCE UTILITY",1.01f,1.14f,.04f,.15f,.88f,{.91f,.95f,.85f},{1.02f,1.00f,.93f},.09f,.035f,.11f,.72f,.25f,.007f,
+        {.45f,.47f,.39f},2.5f,9.f,.07f,.055f,.025f,{.004f,.002f,-.010f},27.f,.002f,
+        .32f,.022f,.05f,1.f,1.f,1.55f,.9f,.025f,.025f,{.43f,.45f,.39f}},
+    {"STORAGE WAREHOUSE",1.02f,1.15f,.04f,.15f,.91f,{.86f,.93f,1.02f},{1.00f,1.02f,1.02f},.09f,.03f,.11f,.72f,.25f,.006f,
+        {.44f,.52f,.58f},3.f,11.f,.065f,.06f,.025f,{-.010f,.001f,.014f},29.f,.002f,
+        .34f,.016f,.055f,1.f,1.f,0.f,0.f,0.f,0.f,{0.f,0.f,0.f}},
+    {"FLIGHT METALLIC",1.03f,1.11f,.03f,.12f,.96f,{.88f,.96f,1.03f},{1.02f,1.04f,1.02f},.075f,.045f,.08f,.76f,.25f,.005f,
+        {.48f,.57f,.63f},3.5f,13.f,.075f,.055f,.025f,{-.007f,.004f,.013f},31.f,.002f,
+        .30f,.018f,.035f,1.f,1.f,0.f,0.f,0.f,0.f,{0.f,0.f,0.f}},
+    {"ENGINEERING MACHINERY",1.02f,1.17f,.04f,.16f,.93f,{.88f,.94f,1.01f},{1.06f,1.02f,.92f},.085f,.06f,.10f,.73f,.25f,.006f,
+        {.46f,.45f,.42f},2.5f,10.f,.065f,.045f,.025f,{.001f,-.005f,.004f},22.f,.003f,
+        .42f,.025f,.05f,1.f,1.f,1.55f,.9f,.03f,.03f,{.43f,.42f,.39f}},
+    {"SECURITY SEVERE",1.01f,1.19f,.045f,.18f,.90f,{.89f,.91f,.98f},{1.07f,.97f,.94f},.08f,.05f,.12f,.71f,.25f,.006f,
+        {.42f,.44f,.49f},3.f,11.f,.06f,.05f,.02f,{.004f,-.008f,.008f},21.f,.002f,
+        .46f,.018f,.055f,1.f,1.f,0.f,0.f,0.f,0.f,{0.f,0.f,0.f}},
+    {"BRIDGE ENDGAME",1.02f,1.20f,.045f,.18f,.94f,{.85f,.92f,1.02f},{1.06f,1.04f,1.01f},.09f,.06f,.115f,.73f,.25f,.005f,
+        {.42f,.48f,.54f},3.f,12.f,.07f,.05f,.025f,{-.009f,.001f,.013f},30.f,.002f,
+        .50f,.022f,.06f,1.f,1.f,1.55f,.9f,.03f,.03f,{.41f,.47f,.53f}},
+    {"GROVE BOTANICAL",1.02f,1.12f,.03f,.12f,.97f,{.87f,1.00f,.96f},{1.02f,1.04f,.98f},.075f,.04f,.085f,.76f,.25f,.005f,
+        {.44f,.57f,.54f},2.5f,11.f,.075f,.045f,.025f,{-.006f,.007f,.002f},28.f,.002f,
+        .28f,.014f,.035f,1.f,1.f,1.55f,.9f,.025f,.025f,{.42f,.52f,.48f}}
 };
+_Static_assert(sizeof(post_presets)/sizeof(post_presets[0])==16,
+    "Every ordinary deck and the separate Groves need an Auto archetype");
 const GpuPostPreset *gpu_post_preset(int level,int choice) {
     return &post_presets[gpu_post_resolve(level,choice)];
 }
@@ -802,10 +834,12 @@ static int submit(void) {
     GLint planes_loc=glGetUniformLocation(program,"maskPlanes");
     GLint emissive_factor_loc=glGetUniformLocation(program,"emissiveFactor");
     const GpuPostPreset *polish=gpu_post_preset(player_struct.level,gShockPrefs.postChoice);
-    int polish_active=generated_active&&gShockPrefs.postEnabled&&polish!=&post_presets[0]&&!post_failed;
+    int post_active=gShockPrefs.postEnabled&&gShockPrefs.doHorrorVisuals==4&&
+        polish!=&post_presets[0]&&!post_failed;
+    int polish_active=generated_active&&post_active;
     float emissive_multiplier=polish_active?gpu_post_multiplier(polish->emissive_multiplier):1.f;
     float light_multiplier=polish_active?gpu_post_multiplier(polish->generated_light_multiplier):1.f;
-    int height_enabled=polish_active&&gShockPrefs.postFxMode>=3;
+    int height_enabled=post_active&&gShockPrefs.postFxMode>=3;
     glUniform1f(glGetUniformLocation(program,"emissiveMultiplier"),emissive_multiplier);
     glUniform4f(glGetUniformLocation(program,"heightFog"),polish->height_fog_base,
         height_enabled?polish->height_fog_falloff:0.f,

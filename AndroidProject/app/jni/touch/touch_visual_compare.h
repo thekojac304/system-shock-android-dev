@@ -30,7 +30,14 @@ static inline const char *touch_compare_mode_label(int mode) {
 
 static inline const char *touch_compare_post_label(int level, int enabled, int choice) {
     if (!enabled) return "POST OFF";
-    if (!choice) return "POST AUTO";
+    if (!choice) {
+        static const char *const auto_labels[10]={
+            "AUTO REACTOR","AUTO MEDICAL","AUTO RESEARCH","AUTO MAINTENANCE",
+            "AUTO STORAGE","AUTO FLIGHT","AUTO EXECUTIVE","AUTO ENGINEERING",
+            "AUTO SECURITY","AUTO BRIDGE"};
+        return level>=0&&level<10?auto_labels[level]:
+            level>=11&&level<=13?"AUTO GROVE":"POST AUTO";
+    }
     if (level==1) {
         if (choice==1) return "MED A";
         if (choice==2) return "MED B";

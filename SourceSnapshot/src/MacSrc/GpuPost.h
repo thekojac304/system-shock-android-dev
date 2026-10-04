@@ -3,8 +3,8 @@
 #define SHOCK_GPU_POST_H
 #include <math.h>
 
-/* Centralized, deliberately small art-direction table. Index zero chooses the
- * level default; indices 1..3 are Medical and 4..6 are Executive. */
+/* Centralized art-direction table. Choice zero selects the level default;
+ * manual choices 1..3 and 4..6 retain the Medical/Executive QA comparisons. */
 typedef struct {
     const char *name;
     float exposure, contrast, toe, shoulder, saturation;
@@ -67,10 +67,14 @@ static inline float gpu_post_drift(float game_seconds,float period,float strengt
 }
 
 static inline int gpu_post_resolve(int level,int choice) {
+    /* Citadel archive order. Gamma is within Executive (6); Delta, Alpha,
+     * and Beta are separate maps (11..13). Cyber/special maps stay neutral. */
+    static const unsigned char auto_by_level[10]={7,1,8,9,10,11,4,12,13,14};
     if(choice<0||choice>6)choice=0;
     if(level==1)return choice>=1&&choice<=3?choice:1;
     if(level==6)return choice>=4&&choice<=6?choice:4;
-    return 0;
+    if(level>=0&&level<10)return auto_by_level[level];
+    return level>=11&&level<=13?15:0;
 }
 
 const GpuPostPreset *gpu_post_preset(int level, int choice);

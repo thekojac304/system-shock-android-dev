@@ -1,0 +1,51 @@
+"""Coverage contract for the accepted, packaged generated-light profiles."""
+import json
+from pathlib import Path
+import struct
+import unittest
+import zipfile
+import zlib
+
+
+ROOT = Path(__file__).resolve().parents[2]
+QA_ASSETS = ROOT / "AndroidProject/app/src/qa/assets/horror-generated"
+QA_APK = ROOT / "AndroidProject/app/build/outputs/apk/qa/app-qa.apk"
+HEADER = struct.Struct("<4s6I32s32s")
+
+
+class DecklightCoverage(unittest.TestCase):
+    def test_accepted_rules_cover_only_anchor_decks(self):
+        rules = json.loads((ROOT / "profiles/horror-author1/rules.json").read_text())
+        self.assertEqual({int(level) for level in rules["archetypes"]}, {1, 6})
+
+    def test_runtime_assets_are_bounded_signed_and_complete(self):
+        if not QA_ASSETS.is_dir():
+            self.skipTest("QA assets require the user's owned archive")
+        assets = sorted(QA_ASSETS.glob("level-*.bin"))
+        self.assertEqual([p.name for p in assets], ["level-1.bin", "level-6.bin"])
+        for asset in assets:
+            blob = asset.read_bytes()
+            magic, version, level, lights, surfaces, regions, crc, baseline, rules = HEADER.unpack_from(blob)
+            self.assertEqual((magic, version, level), (b"HG1P", 1, int(asset.stem.split("-")[1])))
+            self.assertGreater(lights, 0)
+            self.assertGreater(surfaces, 0)
+            self.assertLessEqual(lights, 512)
+            self.assertLessEqual(surfaces, 4096)
+            self.assertLessEqual(regions, 1024)
+            self.assertEqual(zlib.crc32(blob[HEADER.size:]), crc)
+            self.assertEqual(len(baseline), 32)
+            self.assertEqual(len(rules), 32)
+
+    def test_qa_package_contains_only_compact_accepted_profiles(self):
+        if not QA_APK.is_file():
+            self.skipTest("QA APK has not been built")
+        with zipfile.ZipFile(QA_APK) as apk:
+            names = sorted(n for n in apk.namelist() if "horror-generated/" in n)
+            self.assertEqual(names, ["assets/horror-generated/level-1.bin",
+                                     "assets/horror-generated/level-6.bin"])
+            for name in names:
+                self.assertEqual(apk.read(name), (QA_ASSETS / Path(name).name).read_bytes())
+
+
+if __name__ == "__main__":
+    unittest.main()

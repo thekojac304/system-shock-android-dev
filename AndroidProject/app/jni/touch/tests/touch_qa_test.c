@@ -65,6 +65,13 @@ int main(int argc,char **argv) {
     assert(!strcmp(touch_compare_post_label(1,1,1),"MED A"));
     assert(!strcmp(touch_compare_post_label(6,1,4),"EXEC A"));
     assert(!strcmp(touch_compare_post_label(6,1,1),"POST AUTO"));
+    assert(!strcmp(touch_compare_post_label(2,1,0),"AUTO RESEARCH"));
+    assert(!strcmp(touch_compare_post_label(5,1,0),"AUTO FLIGHT"));
+    assert(!strcmp(touch_compare_post_label(9,1,0),"AUTO BRIDGE"));
+    assert(!strcmp(touch_compare_post_label(11,1,0),"AUTO GROVE"));
+    assert(!strcmp(touch_compare_post_label(12,1,0),"AUTO GROVE"));
+    assert(!strcmp(touch_compare_post_label(13,1,0),"AUTO GROVE"));
+    assert(!strcmp(touch_compare_post_label(10,1,0),"POST AUTO"));
     for (int orientation=0;orientation<2;++orientation) {
         TouchControls t;
         touch_init(&t,output,NULL);
