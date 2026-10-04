@@ -131,6 +131,10 @@ void SetDefaultPrefs(void) {
     gShockPrefs.goOnScreenHelp = true;
     gShockPrefs.doGamma = 29;    // Default gamma (29 out of 100).
     gShockPrefs.doHorrorVisuals = false;
+    gShockPrefs.postEnabled = 1;
+    gShockPrefs.postChoice = 0;
+    gShockPrefs.postVignette = 1;
+    gShockPrefs.postGrain = 1;
     gShockPrefs.goMsgLength = 0; // Normal
     audiolog_setting = 1;
 
@@ -182,6 +186,10 @@ int16_t LoadPrefs(void) {
     gShockPrefs.soSoundtrack = SOUNDTRACK_ORIGINAL;
     char line[64];
     gShockPrefs.doHorrorVisuals = false;
+    gShockPrefs.postEnabled = 1;
+    gShockPrefs.postChoice = 0;
+    gShockPrefs.postVignette = 1;
+    gShockPrefs.postGrain = 1;
     while (fgets(line, sizeof(line), f)) {
         char *eq = strchr(line, '=');
         if (!eq)
@@ -196,7 +204,16 @@ int16_t LoadPrefs(void) {
             gShockPrefs.qaCheats = is_true(value);
         } else
 #endif
-        if (strcasecmp(key, "world-visuals") == 0) {
+        if (strcasecmp(key, "world-post") == 0) {
+            gShockPrefs.postEnabled = is_true(value);
+        } else if (strcasecmp(key, "world-post-preset") == 0) {
+            int choice = atoi(value);
+            if (choice >= 0 && choice <= 6) gShockPrefs.postChoice = choice;
+        } else if (strcasecmp(key, "world-post-vignette") == 0) {
+            gShockPrefs.postVignette = is_true(value);
+        } else if (strcasecmp(key, "world-post-grain") == 0) {
+            gShockPrefs.postGrain = is_true(value);
+        } else if (strcasecmp(key, "world-visuals") == 0) {
             gShockPrefs.doHorrorVisuals =
 #ifdef RP5NP_GPU_WORLD
                 strcasecmp(value, "gpu-generated") == 0 ? 4 :
@@ -314,6 +331,10 @@ int16_t SavePrefs(void) {
     fprintf(f, "%s = %d\n", PREF_GAMMA, gShockPrefs.doGamma);
     fprintf(f, "world-visuals = %s\n", gShockPrefs.doHorrorVisuals == 4 ? "gpu-generated" : gShockPrefs.doHorrorVisuals == 3 ? "gpu-prototype" : gShockPrefs.doHorrorVisuals == 2 ? "horror" :
             gShockPrefs.doHorrorVisuals == 1 ? "enhanced" : "original");
+    fprintf(f, "world-post = %s\n", gShockPrefs.postEnabled ? "yes" : "no");
+    fprintf(f, "world-post-preset = %d\n", gShockPrefs.postChoice);
+    fprintf(f, "world-post-vignette = %s\n", gShockPrefs.postVignette ? "yes" : "no");
+    fprintf(f, "world-post-grain = %s\n", gShockPrefs.postGrain ? "yes" : "no");
     fprintf(f, "%s = %d\n", PREF_MSG_LENGTH, gShockPrefs.goMsgLength);
     fprintf(f, "%s = %d\n", PREF_ALOG_SETTING, audiolog_setting);
     fprintf(f, "%s = %d\n", PREF_MIDI_BACKEND, gShockPrefs.soMidiBackend);

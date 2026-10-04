@@ -1,4 +1,5 @@
 #include "GpuWorld.h"
+#include "GpuPost.h"
 /*
 
 Copyright (C) 2015-2018 Night Dive Studios, LLC.
@@ -1850,8 +1851,8 @@ void gamma_slider_dealfunc(ushort gamma_qvar) {
 extern void horror_visuals_set_mode(int mode);
 static void visuals_button_draw(uchar butid) {
     char label[48];
-    strcpy(label,gShockPrefs.doHorrorVisuals==4 ? "GPU\nGENERATED" : gShockPrefs.doHorrorVisuals==3 ? "GPU\nPROOF" : gShockPrefs.doHorrorVisuals==2 ? "VIS1B\nHORROR" :
-                 gShockPrefs.doHorrorVisuals==1 ? "VIS1\nCONSERVATIVE" : "VISUALS\nORIGINAL");
+    strcpy(label,gShockPrefs.doHorrorVisuals==4 ? "GPU\nGEN" : gShockPrefs.doHorrorVisuals==3 ? "GPU\nPROOF" : gShockPrefs.doHorrorVisuals==2 ? "VIS1B\nHORROR" :
+                 gShockPrefs.doHorrorVisuals==1 ? "VIS1\nCONS" : "VISUALS\nORIGINAL");
     text_button(label,BR(butid).ul.x,BR(butid).ul.y,BUTTON_COLOR,BUTTON_SHADOW,
                 BR(butid).ul.x-BR(butid).lr.x,BR(butid).ul.y-BR(butid).lr.y);
 }
@@ -1885,6 +1886,57 @@ static void visuals_button_toggle(uchar butid) {
     opanel_redraw(TRUE);
     uiShowMouse(NULL);
 }
+
+#ifdef RP5NP_GPU_WORLD
+static void post_screen_init(void);
+static void post_button_draw(uchar butid) {
+    char label[48];
+    switch(butid) {
+    case 0: strcpy(label,gShockPrefs.postEnabled?"POST\nON":"POST\nOFF");break;
+    case 1:
+        if(!gShockPrefs.postChoice)strcpy(label,"PRESET\nAUTO");
+        else snprintf(label,sizeof(label),"PRESET\n%s",gpu_post_choice_name(gShockPrefs.postChoice));
+        break;
+    case 2: strcpy(label,gShockPrefs.postVignette?"VIGNETTE\nON":"VIGNETTE\nOFF");break;
+    case 3: strcpy(label,gShockPrefs.postGrain?"GRAIN\nON":"GRAIN\nOFF");break;
+    case 4: strcpy(label,"RESET\nAUTO");break;
+    default: strcpy(label,"VIDEO\nBACK");break;
+    }
+    text_button(label,BR(butid).ul.x,BR(butid).ul.y,BUTTON_COLOR,BUTTON_SHADOW,
+                BR(butid).ul.x-BR(butid).lr.x,BR(butid).ul.y-BR(butid).lr.y);
+}
+static void post_button_toggle(uchar butid) {
+    if(butid==5){video_screen_init();return;}
+    if(butid==0)gShockPrefs.postEnabled=!gShockPrefs.postEnabled;
+    if(butid==1){
+        int first=player_struct.level==1?1:player_struct.level==6?4:0;
+        if(first)gShockPrefs.postChoice=(gShockPrefs.postChoice<first||gShockPrefs.postChoice>=first+2)?first:gShockPrefs.postChoice+1;
+        else gShockPrefs.postChoice=0;
+    }
+    if(butid==2)gShockPrefs.postVignette=!gShockPrefs.postVignette;
+    if(butid==3)gShockPrefs.postGrain=!gShockPrefs.postGrain;
+    if(butid==4){gShockPrefs.postChoice=0;gShockPrefs.postEnabled=1;gShockPrefs.postVignette=1;gShockPrefs.postGrain=1;}
+    uiHideMouse(NULL);render_run();
+    if(full_game_3d)opanel_redraw(FALSE);
+    post_screen_init();uiShowMouse(NULL);
+}
+static void post_screen_init(void) {
+    LGRect r;
+    clear_obuttons();
+    for(int i=0;i<6;i++){
+        standard_button_rect(&r,i,2,2,2);
+        pushbutton_init(i,'p',ID_NULL,post_button_toggle,&r);
+        OButtons[i].drawfunc=post_button_draw;
+    }
+    keywidget_init(QUIT_BUTTON,'x',wrapper_pushbutton_func);
+    opanel_redraw(TRUE);
+}
+static void post_open(uchar butid) {(void)butid;post_screen_init();}
+static void post_open_draw(uchar butid) {
+    text_button("HYBRID\nPOST",BR(butid).ul.x,BR(butid).ul.y,BUTTON_COLOR,BUTTON_SHADOW,
+                BR(butid).ul.x-BR(butid).lr.x,BR(butid).ul.y-BR(butid).lr.y);
+}
+#endif
 
 void video_screen_init(void) {
     LGRect r;
@@ -1954,11 +2006,19 @@ void video_screen_init(void) {
 
     if (i<5) {
         standard_button_rect(&r,i,2,2,2);
-        r.lr.x+=42; /* Bottom-center slot is unused: fit VIS1 CONSERVATIVE. */
         pushbutton_init(i,'h',ID_NULL,visuals_button_toggle,&r);
         OButtons[i].drawfunc=visuals_button_draw;
         i++;
     }
+
+#ifdef RP5NP_GPU_WORLD
+    if(i<5){
+        standard_button_rect(&r,i,2,2,2);
+        pushbutton_init(i,'p',ID_NULL,post_open,&r);
+        OButtons[i].drawfunc=post_open_draw;
+        i++;
+    }
+#endif
 
     // return (fixed at position 5)
     standard_button_rect(&r, 5, 2, 2, 2);

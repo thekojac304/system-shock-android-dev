@@ -54,7 +54,8 @@ typedef struct {
     short doResolution; // 0 - High, 1 - Low
     short doDetail;     // 0 - Min, 1-Low, 2-High, 3-Max
     short doGamma;
-    int doHorrorVisuals; // 0 Original, 1 VIS1 Conservative, 2 VIS1B Horror; not saved-game state.
+    int doHorrorVisuals; // 0 Original, 1 VIS1, 2 VIS1B, 3 GPU proof, 4 GPU generated.
+    int postEnabled, postChoice, postVignette, postGrain; // Presentation only.
     bool doUseQD;
     bool doUseOpenGL;
     // 0 => unfiltered
