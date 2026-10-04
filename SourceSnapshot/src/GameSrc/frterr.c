@@ -911,7 +911,7 @@ static void _fr_flat_ceil(void) {
         return;
     pt_merge_mask = merge_masks[me_bits_mirror(_fdt_mptr)][FDT_LK_CEIL];
     do {
-        gpu_world_surface_subface(loopcnt);
+        gpu_world_surface_subface((_fdt_ttf->flags & FRFLRFLG_2ELEM) ? loopcnt : 0);
         for (pb = (&_fdt_tmppts[0]) + _fdt_ttf->ptsper - 1, i = 0; i < _fdt_ttf->ptsper; i++) {
             pt_code = *ptdat++;
             pt_code = (pt_code ^ pt_merge_mask[0]) & pt_merge_mask[1];
@@ -932,7 +932,7 @@ static void _fr_flat_lit_ceil(void) {
         return;
     pt_merge_mask = merge_masks[me_bits_mirror(_fdt_mptr)][FDT_LK_CEIL];
     do {
-        gpu_world_surface_subface(loopcnt);
+        gpu_world_surface_subface((_fdt_ttf->flags & FRFLRFLG_2ELEM) ? loopcnt : 0);
         for (pb = (&_fdt_tmppts[0]) + _fdt_ttf->ptsper - 1, i = 0; i < _fdt_ttf->ptsper; i++) {
             pt_code = *ptdat++;
             pt_code = (pt_code ^ pt_merge_mask[0]) & pt_merge_mask[1];
@@ -960,7 +960,7 @@ static void _fr_tmap_ceil(void) {
         return;
     pt_merge_mask = merge_masks[me_bits_mirror(_fdt_mptr)][FDT_LK_CEIL];
     do {
-        gpu_world_surface_subface(loopcnt);
+        gpu_world_surface_subface((_fdt_ttf->flags & FRFLRFLG_2ELEM) ? loopcnt : 0);
         for (pb = (&_fdt_tmppts[0]) + _fdt_ttf->ptsper - 1, i = 0; i < _fdt_ttf->ptsper; i++) {
             pt_code = *ptdat++;
             pt_code = (pt_code ^ pt_merge_mask[0]) & pt_merge_mask[1];
@@ -991,7 +991,7 @@ static void _fr_tmap_lit_ceil(void) {
         return;
     pt_merge_mask = merge_masks[me_bits_mirror(_fdt_mptr)][FDT_LK_CEIL];
     do {
-        gpu_world_surface_subface(loopcnt);
+        gpu_world_surface_subface((_fdt_ttf->flags & FRFLRFLG_2ELEM) ? loopcnt : 0);
         for (pb = (&_fdt_tmppts[0]) + _fdt_ttf->ptsper - 1, i = 0; i < _fdt_ttf->ptsper; i++) {
             pt_code = *ptdat++;
             pt_code = (pt_code ^ pt_merge_mask[0]) & pt_merge_mask[1];
