@@ -2,6 +2,7 @@
 #ifndef SHOCK_GPU_WORLD_H
 #define SHOCK_GPU_WORLD_H
 #include "3d.h"
+#include "GpuSurfaceId.h"
 #include <SDL.h>
 #ifdef RP5NP_GPU_WORLD
 int gpu_world_begin(void);

@@ -44,6 +44,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "rendtool.h"
 #include "textmaps.h" // pain, sadness
 #include "horror_visuals.h"
+#include "GpuSurfaceId.h"
 
 #define FLIP_BITS
 
@@ -73,6 +74,21 @@ int csp_trans_add[] = {0, DEF_MAP_SZ, DEF_MAP_SZ + 1, 1}; // alternate mapping o
 
 int _fdt_x, _fdt_y, _fdt_mask; // implicit parameters to draw tile
 MapElem *_fdt_mptr;            // more implicit parameters
+static uchar _fdt_tt;          // current tile type, used by source surface IDs
+
+/* Source map state discriminator for generated-light metadata. The underlying
+ * terrain emission and gameplay state remain untouched. External walls also
+ * bind to their neighbor, whose height/type may change the emitted strips. */
+static uint32_t _fr_gpu_geom_key(MapElem *m) {
+    return (uint32_t)me_tiletype(m)|((uint32_t)me_height_flr(m)<<6)|
+        ((uint32_t)me_height_ceil(m)<<11)|((uint32_t)me_param(m)<<16)|
+        ((uint32_t)me_bits_mirror(m)<<24);
+}
+static void _fr_gpu_surface(int kind,int face,int subface,int external) {
+    uint32_t key=_fr_gpu_geom_key(_fdt_mptr);
+    uint32_t neighbor=external?_fr_gpu_geom_key(_fdt_mptr+wall_adds[face]):0;
+    gpu_world_surface_set(_fdt_x,_fdt_y,kind,face,subface,_fdt_tt,key,neighbor);
+}
 
 // texture mapping function pointers.
 void (*_fr_lit_floor_func)(int, g3s_phandle *, grs_bitmap *);
@@ -91,7 +107,6 @@ int _fr_altcamx, _fr_altcamy;
 #endif
 
 // various nested locals, read static globals in C
-static uchar _fdt_tt;           // local storage of our current tile's tiletype
 static TilesToWalls _fdt_ttw;   // secret tiles to walls code
 static TilesToFloors *_fdt_ttf; // pointer to current floor spew
 static uchar _fdt_hgts[5];      // parm, flr, ceil, fprm, cprm
@@ -746,6 +761,7 @@ static void _fr_flat_flr(void) {
     loopcnt = _fdt_ttf->flags >> FRFLRSHF_2ELEM; // 0 or 1
     pt_merge_mask = merge_masks[me_bits_mirror(_fdt_mptr)][FDT_LK_FLR];
     do {
+        gpu_world_surface_subface(loopcnt);
         for (pb = &_fdt_tmppts[0], i = 0; i < _fdt_ttf->ptsper; i++) {
             pt_code = *ptdat++;
             pt_code = (pt_code ^ pt_merge_mask[0]) & pt_merge_mask[1];
@@ -767,6 +783,7 @@ static void _fr_flat_lit_flr(void) {
     pt_merge_mask = merge_masks[me_bits_mirror(_fdt_mptr)][FDT_LK_FLR];
     gr_set_fcolor((*fr_get_idx)());
     do {
+        gpu_world_surface_subface(loopcnt);
         for (pb = &_fdt_tmppts[0], i = 0; i < _fdt_ttf->ptsper; i++) {
             pt_code = *ptdat++;
             pt_code = (pt_code ^ pt_merge_mask[0]) & pt_merge_mask[1];
@@ -792,6 +809,7 @@ static void _fr_tmap_flr(void) {
     loopcnt = _fdt_ttf->flags >> FRFLRSHF_2ELEM; // 0 or 1
     pt_merge_mask = merge_masks[me_bits_mirror(_fdt_mptr)][FDT_LK_FLR];
     do {
+        gpu_world_surface_subface(loopcnt);
         for (pb = &_fdt_tmppts[0], i = 0; i < _fdt_ttf->ptsper; i++) {
             pt_code = *ptdat++;
             pt_code = (pt_code ^ pt_merge_mask[0]) & pt_merge_mask[1];
@@ -821,6 +839,7 @@ static void _fr_tmap_lit_flr(void) {
     loopcnt = _fdt_ttf->flags >> FRFLRSHF_2ELEM; // 0 or 1
     pt_merge_mask = merge_masks[me_bits_mirror(_fdt_mptr)][FDT_LK_FLR];
     do {
+        gpu_world_surface_subface(loopcnt);
         for (pb = &_fdt_tmppts[0], i = 0; i < _fdt_ttf->ptsper; i++) {
             pt_code = *ptdat++;
             pt_code = (pt_code ^ pt_merge_mask[0]) & pt_merge_mask[1];
@@ -892,6 +911,7 @@ static void _fr_flat_ceil(void) {
         return;
     pt_merge_mask = merge_masks[me_bits_mirror(_fdt_mptr)][FDT_LK_CEIL];
     do {
+        gpu_world_surface_subface(loopcnt);
         for (pb = (&_fdt_tmppts[0]) + _fdt_ttf->ptsper - 1, i = 0; i < _fdt_ttf->ptsper; i++) {
             pt_code = *ptdat++;
             pt_code = (pt_code ^ pt_merge_mask[0]) & pt_merge_mask[1];
@@ -912,6 +932,7 @@ static void _fr_flat_lit_ceil(void) {
         return;
     pt_merge_mask = merge_masks[me_bits_mirror(_fdt_mptr)][FDT_LK_CEIL];
     do {
+        gpu_world_surface_subface(loopcnt);
         for (pb = (&_fdt_tmppts[0]) + _fdt_ttf->ptsper - 1, i = 0; i < _fdt_ttf->ptsper; i++) {
             pt_code = *ptdat++;
             pt_code = (pt_code ^ pt_merge_mask[0]) & pt_merge_mask[1];
@@ -939,6 +960,7 @@ static void _fr_tmap_ceil(void) {
         return;
     pt_merge_mask = merge_masks[me_bits_mirror(_fdt_mptr)][FDT_LK_CEIL];
     do {
+        gpu_world_surface_subface(loopcnt);
         for (pb = (&_fdt_tmppts[0]) + _fdt_ttf->ptsper - 1, i = 0; i < _fdt_ttf->ptsper; i++) {
             pt_code = *ptdat++;
             pt_code = (pt_code ^ pt_merge_mask[0]) & pt_merge_mask[1];
@@ -969,6 +991,7 @@ static void _fr_tmap_lit_ceil(void) {
         return;
     pt_merge_mask = merge_masks[me_bits_mirror(_fdt_mptr)][FDT_LK_CEIL];
     do {
+        gpu_world_surface_subface(loopcnt);
         for (pb = (&_fdt_tmppts[0]) + _fdt_ttf->ptsper - 1, i = 0; i < _fdt_ttf->ptsper; i++) {
             pt_code = *ptdat++;
             pt_code = (pt_code ^ pt_merge_mask[0]) & pt_merge_mask[1];
@@ -1204,12 +1227,16 @@ void _render_3d_walls(int which, int cnt) {
     _fdt_rcore += _fdt_x;
     switch (cnt) {
     case 4:
+        _fr_gpu_surface(GWS_EXTERNAL_WALL,which,3,1);
         _fr_terr_ext_wall(final_wall[3]);
     case 3:
+        _fr_gpu_surface(GWS_EXTERNAL_WALL,which,2,1);
         _fr_terr_ext_wall(final_wall[2]);
     case 2:
+        _fr_gpu_surface(GWS_EXTERNAL_WALL,which,1,1);
         _fr_terr_ext_wall(final_wall[1]);
     case 1:
+        _fr_gpu_surface(GWS_EXTERNAL_WALL,which,0,1);
         _fr_terr_ext_wall(final_wall[0]);
     case 0:
         break;
@@ -1448,6 +1475,7 @@ void parse_clip_tile() {}
 // if you're so special, why aren't you dead
 // implicit parameters are _fdt_x,_fdt_y,_fdt_mptr,_fdt_mask
 void fr_draw_tile(void) {
+    gpu_world_surface_clear();
     if ((_fdt_tt = me_tiletype(_fdt_mptr)) == TILE_SOLID) // really, clip should deal
     {
         me_subclip_set(_fdt_mptr, SUBCLIP_OUT_OF_CONE); // sure, deal with it...
@@ -1501,17 +1529,23 @@ void fr_draw_tile(void) {
             // this cant be done yet
             // _fdt_hgts[FDT_PT_CPRM]=MAX_HGT-me_height_ceil(_fdt_mptr)-me_param(_fdt_mptr);
             // _fdt_hgts[FDT_PT_PARM]=me_param(_fdt_mptr);
+            _fr_gpu_surface(GWS_INTERNAL_WALL,_fdt_ttw.wallbase+5,0,0);
             _fr_terr_int_wall(_fdt_ttw.wallbase + 5); // or hmm.. a temp
         case 5:
+            _fr_gpu_surface(GWS_INTERNAL_WALL,_fdt_ttw.wallbase+4,0,0);
             _fr_terr_int_wall(_fdt_ttw.wallbase + 4); //  variable and then
         case 4:
+            _fr_gpu_surface(GWS_INTERNAL_WALL,_fdt_ttw.wallbase+3,0,0);
             _fr_terr_int_wall(_fdt_ttw.wallbase + 3); //  increment it in
         case 3:
+            _fr_gpu_surface(GWS_INTERNAL_WALL,_fdt_ttw.wallbase+2,0,0);
             _fr_terr_int_wall(_fdt_ttw.wallbase + 2); //  each case??
 #endif
         case 2:
+            _fr_gpu_surface(GWS_INTERNAL_WALL,_fdt_ttw.wallbase+1,0,0);
             _fr_terr_int_wall(_fdt_ttw.wallbase + 1);
         case 1:
+            _fr_gpu_surface(GWS_INTERNAL_WALL,_fdt_ttw.wallbase,0,0);
             _fr_terr_int_wall(_fdt_ttw.wallbase + 0);
         case 0:
             break;
@@ -1523,12 +1557,15 @@ void fr_draw_tile(void) {
     _game_fr_tmap = me_tmap_flr(_fdt_mptr);
     horror_visuals_restore(visual_scope);
     visual_scope=horror_visuals_bind(_fdt_x,_fdt_y,HV_FLOOR,loved_textures[_game_fr_tmap],0);
+    _fr_gpu_surface(GWS_FLOOR,0,0,0);
     _fr_terr_flr();
     _game_fr_tmap = me_tmap_ceil(_fdt_mptr);
     horror_visuals_restore(visual_scope);
     visual_scope=horror_visuals_bind(_fdt_x,_fdt_y,HV_CEILING,loved_textures[_game_fr_tmap],0);
+    _fr_gpu_surface(GWS_CEILING,0,0,0);
     _fr_terr_ceil();
     horror_visuals_restore(visual_scope);
+    gpu_world_surface_clear();
     // now check object cache
 
     // FIXME HAX HAX HAX why does this segfault?

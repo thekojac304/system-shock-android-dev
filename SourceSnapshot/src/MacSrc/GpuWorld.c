@@ -40,7 +40,7 @@ extern int secret_render_fx;
 
 enum { MAX_DRAWS=4096, MAX_VERTICES=32768, MAX_TEXTURES=GW_CACHE_MAX_SLOTS };
 typedef struct { float clip[4], world[3], uv[2], darkness; } Vertex;
-typedef struct { int first, count, texture, cutout, emissive, receivers; } Draw;
+typedef struct { int first, count, texture, cutout, emissive, receivers, material_id; GpuSurfaceId surface; } Draw;
 typedef struct { float x,y,ceiling_offset,radius,rgb[3],intensity; int tile_x,tile_y; } Light;
 static const Light medical_lights[2] = {
     {30.0f,23.8f,0.35f,4.2f,{0.13f,0.8f,1.0f},2.4f,30,23},
@@ -54,6 +54,7 @@ static GLuint texture_gl[MAX_TEXTURES];
 static unsigned char texture_retired[MAX_TEXTURES];
 static int cache_initialized;
 static int active, failed, object_id=-1, object_lit=1, ndraw, nvertex, ready, disabled;
+static GpuSurfaceId current_surface;
 static int medical_profile;
 static unsigned frame, fallbacks, uploads, upload_bytes;
 static int retained, command_valid, view_w,view_h, gpu_w,gpu_h;
@@ -332,6 +333,8 @@ static void metadata(Draw *d) {
     if(object_id>=0){x=objs[object_id].loc.x>>8;y=objs[object_id].loc.y>>8;d->emissive=!object_lit;}
     else {material=loved_textures[_game_fr_tmap];d->emissive=material==35||material==216;
         unsigned type=me_tiletype(MAP_GET_XY(x,y));if(type<64)terrain_types|=UINT64_C(1)<<type;}
+    d->material_id=material;
+    d->surface=object_id>=0?(GpuSurfaceId){0}:current_surface;
     const HvTile *tile=medical_profile?hv_region_tile(x,y):NULL;
     if(medical_profile&&!tile&&object_id>=0){if(!(objs[object_id].loc.y&255))tile=hv_region_tile(x,y-1);if(!tile&&!(objs[object_id].loc.x&255))tile=hv_region_tile(x-1,y);}
     /* Authored receiver membership prevents influence in adjacent unrelated
@@ -489,6 +492,16 @@ void gpu_world_object(int id,int type,int lit) {
          ID2TRIP(id)!=SECURE_CONTR_TRIPLE && ID2TRIP(id)!=BARRICADE_TRIPLE))gpu_world_reject("unsupported object representation");
 }
 void gpu_world_object_end(void){object_id=-1;object_lit=1;}
+void gpu_world_surface_set(int x,int y,int kind,int face,int subface,int terrain_type,
+        uint32_t geometry_key,uint32_t neighbor_geometry_key) {
+    current_surface=gpu_surface_id_make(player_struct.level,x,y,kind,face,subface,
+        terrain_type,geometry_key,neighbor_geometry_key);
+}
+void gpu_world_surface_subface(int subface) {
+    if(subface<0||subface>7)current_surface.valid=0;
+    else if(current_surface.valid)current_surface.subface=(uint8_t)subface;
+}
+void gpu_world_surface_clear(void){current_surface=(GpuSurfaceId){0};}
 
 int gpu_world_begin(void) {
     int previous=active;active=0;
@@ -517,7 +530,8 @@ int gpu_world_begin(void) {
         const HvTile *t=&hv_medical_tiles[i];MapElem *m=MAP_GET_XY(t->x,t->y);
         if(me_tiletype(m)!=t->type||me_height_flr(m)!=t->floor_height||me_height_ceil(m)!=t->ceiling_height||loved_textures[me_tmap_wall(m)]!=t->wall||loved_textures[me_tmap_flr(m)]!=t->floor||loved_textures[me_tmap_ceil(m)]!=t->ceiling)medical_profile=0;
     }
-    active=1;failed=0;failure=NULL;retained=command_valid=0;ndraw=nvertex=0;object_id=-1;++frame;
+    active=1;failed=0;failure=NULL;retained=command_valid=0;ndraw=nvertex=0;object_id=-1;
+    gpu_world_surface_clear();++frame;
     qa_animation_begin();
     if(!cache_initialized){gw_cache_init(&texture_cache,MAX_TEXTURES,GW_CACHE_DEFAULT_BYTES,retire_texture,NULL);cache_initialized=1;}
     gw_cache_begin(&texture_cache);
