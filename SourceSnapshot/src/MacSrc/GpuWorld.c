@@ -85,11 +85,13 @@ static const char *failure;
 static const GpuPostPreset post_presets[] = {
     {"NEUTRAL",1.f,1.f,0.f,0.f,1.f,{1,1,1},{1,1,1},0,0,0,.8f,.3f,0},
     {"MED CLINICAL",1.02f,1.13f,.035f,.12f,.94f,{.78f,.90f,1.05f},{1.02f,1.02f,1.f},.10f,.025f,.10f,.72f,.25f,.007f,
-        {.53f,.63f,.68f},2.f,9.f,.070f,.070f,.030f,{-.020f,.004f,.025f},18.f,.004f},
+        {.53f,.63f,.68f},2.f,9.f,.070f,.070f,.030f,{-.020f,.004f,.025f},18.f,.004f,
+        0.f,0.f,0.f,1.f,1.f,0.f,0.f,0.f,0.f,{0.f,0.f,0.f}},
     {"MED DISEASED",.99f,1.18f,.055f,.16f,.83f,{.77f,1.02f,1.f},{1.f,1.01f,.98f},.14f,.025f,.13f,.69f,.26f,.012f},
     {"MED CINEMATIC",1.03f,1.22f,.04f,.20f,.94f,{.78f,.88f,1.06f},{1.08f,1.03f,.92f},.13f,.08f,.14f,.73f,.26f,.006f},
     {"EXEC DECAY",1.02f,1.17f,.04f,.17f,.94f,{.85f,.91f,1.02f},{1.07f,1.01f,.89f},.10f,.08f,.11f,.74f,.25f,.006f,
-        {.47f,.42f,.38f},3.f,12.f,.080f,.050f,.025f,{.015f,-.010f,.012f},26.f,.003f},
+        {.47f,.42f,.38f},3.f,12.f,.080f,.050f,.025f,{.005f,-.010f,.012f},26.f,.003f,
+        .55f,.030f,.08f,.88f,1.05f,1.55f,.9f,.045f,.04f,{.45f,.42f,.39f}},
     {"EXEC GOLD",1.01f,1.20f,.05f,.22f,.87f,{.92f,.94f,1.f},{1.08f,.99f,.80f},.07f,.11f,.13f,.72f,.25f,.008f},
     {"EXEC CORPORATE",1.f,1.16f,.04f,.18f,.91f,{.86f,.94f,1.03f},{1.06f,1.02f,.95f},.11f,.055f,.09f,.75f,.25f,.005f}
 };
@@ -249,9 +251,9 @@ static const char *vs =
 static const char *fs =
     "#version 300 es\nprecision highp float;precision highp usampler2D;\n"
     "uniform usampler2D indices,maskTex;uniform sampler2D pal;"
-    "uniform int cutout,emissive,receivers,generated,maskRow,genCount;uniform float emissiveFactor;"
+    "uniform int cutout,emissive,receivers,generated,maskRow,genCount;uniform float emissiveFactor,emissiveMultiplier;"
     "uniform vec4 lights[4],colors[4],maskPlanes[64];uniform ivec4 maskCounts[4];"
-    "uniform vec3 ambient,cameraWorld;uniform float gammaExponent;"
+    "uniform vec3 ambient,cameraWorld,heightFogColor;uniform float gammaExponent;uniform vec4 heightFog;"
     "in vec3 W;in vec2 U;in float D;out vec4 result;"
     "void main(){ivec2 sz=textureSize(indices,0);"
     "ivec2 tc=ivec2(floor(fract(U)*vec2(sz)));"
@@ -273,9 +275,12 @@ static const char *fs =
     "illumination+=colors[j].rgb*colors[j].a*a*a;}}}"
     "bool selflit=maskRow>=0?texelFetch(maskTex,ivec2(int(idx),maskRow),0).r!=0u:"
     "(idx==1u||(idx>=3u&&idx<=7u)||(idx>=11u&&idx<=31u));"
-    "vec3 linear=(emissive!=0||selflit)?base*emissiveFactor:base*illumination;"
-    "result=vec4(pow(clamp(linear,0.0,1.0),vec3(gammaExponent/2.2)),"
-    "clamp(distance(W,cameraWorld)/24.0,0.0,1.0));}";
+    "float fixtureScale=(maskRow>=0&&selflit)?emissiveMultiplier:1.0;"
+    "vec3 linear=(emissive!=0||selflit)?base*emissiveFactor*fixtureScale:base*illumination;"
+    "float dist=distance(W,cameraWorld);vec3 color=pow(clamp(linear,0.0,1.0),vec3(gammaExponent/2.2));"
+    "float low=clamp((heightFog.x-W.z)/max(heightFog.y,.001),0.0,1.0);low=low*low*(3.0-2.0*low);"
+    "float far=smoothstep(2.0,10.0,dist);float fog=min(heightFog.w,low*far*heightFog.z);"
+    "color=mix(color,heightFogColor,fog);result=vec4(color,clamp(dist/24.0,0.0,1.0));}";
 
 static int inject(const char *name) {
     char path[96];snprintf(path,sizeof(path),"gpu-render1b-fail-%s.txt",name);
@@ -302,7 +307,7 @@ static const char *post_fs=
     "#version 300 es\nprecision highp float;"
     "uniform sampler2D sourceWorld;uniform vec4 gradeA,gradeB;"
     "uniform vec3 shadowTint,highlightTint,hazeColor,shadowBias;"
-    "uniform vec4 tintAndFx,atmosphere;uniform vec2 distanceFx;uniform vec3 vignette;"
+    "uniform vec4 tintAndFx,atmosphere,toneZones;uniform vec2 distanceFx;uniform vec3 vignette;"
     "out vec4 result;"
     "void main(){ivec2 xy=ivec2(gl_FragCoord.xy);vec2 size=vec2(textureSize(sourceWorld,0));"
     "vec2 uv=(vec2(xy)+.5)/size;vec4 src=texelFetch(sourceWorld,xy,0);"
@@ -314,6 +319,12 @@ static const char *post_fs=
     "c+=shadowBias*lum*sw;c*=1.0+distanceFx.y*sw;"
     "c=pow(max(c,vec3(0)),vec3(gradeA.y));c=mix(c,sqrt(c),gradeA.z);"
     "c=c/(1.0+gradeA.w*max(c-.68,vec3(0)));"
+    "c*=1.0+toneZones.z*(1.0-smoothstep(.02,.16,c));"
+    "float mid=dot(c,vec3(.2126,.7152,.0722));"
+    "float mw=smoothstep(.03,.16,mid)*(1.0-smoothstep(.36,.68,mid));"
+    "c+=vec3(toneZones.y*mw);"
+    "vec3 excess=max(c-vec3(.64),vec3(0));"
+    "c=min(c,vec3(.64))+excess/(1.0+2.0*toneZones.x*excess);"
     "float far=smoothstep(atmosphere.x,atmosphere.y,src.a*24.0)*step(0.001,src.a);"
     "float y=dot(c,vec3(.2126,.7152,.0722));"
     "c=mix(c,vec3(y),far*atmosphere.w);"
@@ -790,6 +801,17 @@ static int submit(void) {
     GLint ambient_loc=glGetUniformLocation(program,"ambient"),counts_loc=glGetUniformLocation(program,"maskCounts");
     GLint planes_loc=glGetUniformLocation(program,"maskPlanes");
     GLint emissive_factor_loc=glGetUniformLocation(program,"emissiveFactor");
+    const GpuPostPreset *polish=gpu_post_preset(player_struct.level,gShockPrefs.postChoice);
+    int polish_active=generated_active&&gShockPrefs.postEnabled&&polish!=&post_presets[0]&&!post_failed;
+    float emissive_multiplier=polish_active?gpu_post_multiplier(polish->emissive_multiplier):1.f;
+    float light_multiplier=polish_active?gpu_post_multiplier(polish->generated_light_multiplier):1.f;
+    int height_enabled=polish_active&&gShockPrefs.postFxMode>=3;
+    glUniform1f(glGetUniformLocation(program,"emissiveMultiplier"),emissive_multiplier);
+    glUniform4f(glGetUniformLocation(program,"heightFog"),polish->height_fog_base,
+        height_enabled?polish->height_fog_falloff:0.f,
+        height_enabled?polish->height_fog_density:0.f,
+        height_enabled?polish->height_fog_max:0.f);
+    glUniform3fv(glGetUniformLocation(program,"heightFogColor"),1,polish->height_fog_color);
     generated_draws=generated_refs=generated_max_refs=generated_partials=0;
     glActiveTexture(GL_TEXTURE0);
     for(int i=0;i<ndraw;i++){
@@ -809,7 +831,7 @@ static int submit(void) {
                 const GgReceiver *r=&d->generated_surface->lights[j];
                 const GgLight *l=&generated_profile->lights[r->light_index];
                 memcpy(positions+j*4,l->position,3*sizeof(float));positions[j*4+3]=l->radius;
-                memcpy(colors+j*4,l->rgb,3*sizeof(float));colors[j*4+3]=l->intensity*source_multiplier[r->light_index];
+                memcpy(colors+j*4,l->rgb,3*sizeof(float));colors[j*4+3]=l->intensity*source_multiplier[r->light_index]*light_multiplier;
                 counts[j*4]=r->polygons;counts[j*4+1]=r->plane_counts[0];
                 counts[j*4+2]=r->plane_counts[1];counts[j*4+3]=r->kind;
                 if(r->kind==2)generated_partials++;
@@ -945,6 +967,8 @@ static SDL_Texture *post_process(void) {
     glUniform1i(glGetUniformLocation(post_program,"sourceWorld"),0);
     glUniform4f(glGetUniformLocation(post_program,"gradeA"),preset->exposure,preset->contrast,preset->toe,preset->shoulder);
     glUniform4f(glGetUniformLocation(post_program,"gradeB"),preset->saturation,0,0,0);
+    glUniform4f(glGetUniformLocation(post_program,"toneZones"),preset->highlight_rolloff,
+        preset->midtone_lift,preset->nearblack_preserve,0.f);
     glUniform3fv(glGetUniformLocation(post_program,"shadowTint"),1,preset->shadow);
     glUniform3fv(glGetUniformLocation(post_program,"highlightTint"),1,preset->highlight);
     glUniform4f(glGetUniformLocation(post_program,"tintAndFx"),preset->shadow_strength,preset->highlight_strength,

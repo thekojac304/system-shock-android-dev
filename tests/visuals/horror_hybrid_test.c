@@ -41,6 +41,37 @@ int main(void) {
     assert(gpu_post_shadow_weight(1.f)==0.f);
     assert(gpu_post_shadow_weight(.2f)>gpu_post_shadow_weight(.8f));
     assert(gpu_post_shadow_weight(0.f)*0.f==0.f); /* Pure black is not tinted. */
+    /* Executive high-only rolloff does not touch midtones. */
+    assert(gpu_post_highlight(.4f,.55f)==.4f);
+    assert(gpu_post_highlight(1.f,.55f)<.91f);
+    assert(gpu_post_highlight(1.f,.55f)>.8f);
+    for(int i=0;i<=100;i++){
+        float x=i*.01f;
+        float y=gpu_post_highlight(x,.55f);
+        assert(y>=0.f&&y<=1.f);
+        if(i)assert(y>=gpu_post_highlight((i-1)*.01f,.55f));
+    }
+    /* Bounded midtone zone and black-preserving near-black soft knee. */
+    assert(gpu_post_midtone_weight(0.f)==0.f);
+    assert(gpu_post_midtone_weight(.25f)>.9f);
+    assert(gpu_post_midtone_weight(.8f)==0.f);
+    assert(gpu_post_nearblack(0.f,.08f)==0.f);
+    assert(gpu_post_nearblack(.05f,.08f)>.05f);
+    assert(gpu_post_nearblack(.2f,.08f)==.2f);
+    /* The reviewed fixture and generated receiver scales are bounded. */
+    assert(gpu_post_multiplier(0.f)==1.f); /* Older presets are neutral. */
+    assert(fabsf(gpu_post_multiplier(.88f)-.88f)<.00001f);
+    assert(fabsf(gpu_post_multiplier(1.05f)-1.05f)<.00001f);
+    assert(gpu_post_multiplier(99.f)==1.5f);
+    /* Existing shadow/highlight weights remain separate and pure black safe. */
+    assert(gpu_post_shadow_weight(.1f)>gpu_post_shadow_weight(.7f));
+    assert(gpu_post_distance_factor(.9f,.45f,.9f)==1.f);
+    /* Fog affects low distant geometry only and caps its contribution. */
+    assert(gpu_post_height_fog(.1f,10.f,.85f,.9f,.045f,.04f)>0.f);
+    assert(gpu_post_height_fog(2.f,10.f,.85f,.9f,.045f,.04f)==0.f);
+    assert(gpu_post_height_fog(.1f,1.f,.85f,.9f,.045f,.04f)==0.f);
+    assert(gpu_post_height_fog(.1f,20.f,.85f,.9f,1.f,.04f)<=.04f);
+    assert(gpu_post_height_fog(.1f,20.f,.85f,0.f,.045f,.04f)==0.f);
     assert(gpu_post_drift(123.f,18.f,0.f)==0.f);
     assert(gpu_post_drift(123.f,0.f,.004f)==0.f);
     for(int i=0;i<10000;i++)assert(fabsf(gpu_post_drift(i*.01f,18.f,.004f))<=.004001f);
