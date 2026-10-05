@@ -42,7 +42,7 @@ extern uchar wrapper_panel_on;
 extern int _game_fr_tmap;
 extern int secret_render_fx;
 
-enum { MAX_DRAWS=4096, MAX_VERTICES=32768, MAX_TEXTURES=GW_CACHE_MAX_SLOTS };
+enum { MAX_DRAWS=4096, MAX_VERTICES=32768, MAX_STAR_PIXELS=16384, MAX_TEXTURES=GW_CACHE_MAX_SLOTS };
 typedef struct { float clip[4], world[3], uv[2], darkness; } Vertex;
 typedef struct { int first, count, texture, cutout, emissive, receivers, material_id,mask_row,ambient_tile,source_light; float source_multiplier; GpuSurfaceId surface; const GgSurface *generated_surface; } Draw;
 typedef struct { float x,y,ceiling_offset,radius,rgb[3],intensity; int tile_x,tile_y; } Light;
@@ -52,6 +52,8 @@ static const Light medical_lights[2] = {
 };
 static const float medical_ambient[3]={0.065f,0.075f,0.085f};
 static Vertex vertices[MAX_VERTICES];
+static Vertex star_pixels[MAX_STAR_PIXELS];
+static int nstar_pixels;
 static Draw draws[MAX_DRAWS];
 static GwTextureCache texture_cache;
 static GLuint texture_gl[MAX_TEXTURES];
@@ -69,7 +71,7 @@ static unsigned char *software_world;
 static size_t software_capacity;
 static SDL_Rect destination;
 static SDL_Texture *world;
-static GLuint program,vao,vbo,palette,mask_texture,depth;
+static GLuint program,star_program,vao,vbo,palette,mask_texture,depth;
 static GLuint post_program,post_vao,post_source;
 static SDL_Texture *post_world;
 static int post_ready,post_failed;
@@ -313,6 +315,17 @@ static const char *fs =
     "float low=clamp((heightFog.x-W.z)/max(heightFog.y,.001),0.0,1.0);low=low*low*(3.0-2.0*low);"
     "float far=smoothstep(2.0,10.0,dist);float fog=min(heightFog.w,low*far*heightFog.z);"
     "color=mix(color,heightFogColor,fog);result=vec4(color,clamp(dist/24.0,0.0,1.0));}";
+/* Star positions and palette indices come from the original indexed renderer.
+ * It accepts a pixel only when the completed software world still contains
+ * sky index 255, so no approximate depth or new sky coverage rule is needed. */
+static const char *star_vs =
+    "#version 300 es\nprecision highp float;"
+    "layout(location=0) in vec4 pos;layout(location=2) in vec2 uv;"
+    "flat out int index;void main(){gl_Position=pos;gl_PointSize=1.0;index=int(uv.x);}";
+static const char *star_fs =
+    "#version 300 es\nprecision highp float;"
+    "uniform sampler2D pal;flat in int index;out vec4 result;"
+    "void main(){result=vec4(texelFetch(pal,ivec2(index,0),0).rgb,0.0);}";
 
 static int inject(const char *name) {
     char path[96];snprintf(path,sizeof(path),"gpu-render1b-fail-%s.txt",name);
@@ -402,8 +415,8 @@ static void post_initialize(void) {
  * renderer's ownership list; the presenter retires that entire owner safely. */
 static void resources_dispose(int lost) {
     retained=ready=0;
-    if(!lost){if(program)glDeleteProgram(program);if(post_program)glDeleteProgram(post_program);glDeleteVertexArrays(1,&vao);glDeleteVertexArrays(1,&post_vao);glDeleteBuffers(1,&vbo);glDeleteTextures(1,&palette);glDeleteTextures(1,&mask_texture);glDeleteTextures(1,&post_source);glDeleteRenderbuffers(1,&depth);}
-    program=vao=vbo=palette=mask_texture=depth=0;uploaded_masks_level=-1;
+    if(!lost){if(program)glDeleteProgram(program);if(star_program)glDeleteProgram(star_program);if(post_program)glDeleteProgram(post_program);glDeleteVertexArrays(1,&vao);glDeleteVertexArrays(1,&post_vao);glDeleteBuffers(1,&vbo);glDeleteTextures(1,&palette);glDeleteTextures(1,&mask_texture);glDeleteTextures(1,&post_source);glDeleteRenderbuffers(1,&depth);}
+    program=star_program=vao=vbo=palette=mask_texture=depth=0;uploaded_masks_level=-1;
     post_program=post_vao=post_source=0;post_ready=post_failed=0;
     for(int i=0;i<MAX_TEXTURES;i++){if(!lost)glDeleteTextures(1,&texture_gl[i]);texture_gl[i]=0;texture_retired[i]=0;}
     if(world&&!lost)SDL_DestroyTexture(world);world=NULL;uploaded_palette=0;
@@ -422,6 +435,13 @@ static int initialize(void) {
     GLint ok=0;
     if(vert&&frag){program=glCreateProgram();glAttachShader(program,vert);glAttachShader(program,frag);glLinkProgram(program);glGetProgramiv(program,GL_LINK_STATUS,&ok);}
     glDeleteShader(vert);glDeleteShader(frag);
+    if(ok){
+        GLuint sv=shader(GL_VERTEX_SHADER,star_vs),sf=shader(GL_FRAGMENT_SHADER,star_fs);
+        ok=0;
+        if(sv&&sf){star_program=glCreateProgram();glAttachShader(star_program,sv);glAttachShader(star_program,sf);
+            glLinkProgram(star_program);glGetProgramiv(star_program,GL_LINK_STATUS,&ok);}
+        if(sv)glDeleteShader(sv);if(sf)glDeleteShader(sf);
+    }
     char info[2048]={0};if(program)glGetProgramInfoLog(program,sizeof(info),NULL,info);
     SDL_Log("GPU1B program link=%d log=%s",ok,info);
     if(ok){
@@ -704,6 +724,15 @@ void gpu_world_polygon(long color,int n,g3s_phandle *p,int gouraud) {
     unsigned char index=(unsigned char)color;grs_bitmap bm;memset(&bm,0,sizeof(bm));bm.bits=&index;bm.w=bm.h=bm.row=1;bm.type=BMT_FLAT8;
     gpu_world_face(n,p,&bm,0);
 }
+void gpu_world_star_pixel(int x,int y,unsigned char index) {
+    if(!gpu_world_active())return;
+    if(x<0||y<0||x>=view_w||y>=view_h){gpu_world_reject("star pixel outside view");return;}
+    if(nstar_pixels>=MAX_STAR_PIXELS){gpu_world_reject("star pixel capacity");return;}
+    Vertex *v=&star_pixels[nstar_pixels++];memset(v,0,sizeof(*v));
+    v->clip[0]=((float)x+.5f)*2.f/view_w-1.f;
+    v->clip[1]=((float)y+.5f)*2.f/view_h-1.f;
+    v->clip[3]=1.f;v->uv[0]=(float)index;
+}
 void gpu_world_sprite(grs_bitmap *bm,grs_vertex **p,g3s_phandle anchor,const unsigned char *clut) {
     if(!gpu_world_active())return;
     int tex=texture_index(bm);if(tex<0)return;
@@ -763,7 +792,7 @@ int gpu_world_begin(void) {
     }
     generated_active=0;
     if(gShockPrefs.doHorrorVisuals==4)generated_prepare();
-    active=1;failed=0;failure=NULL;retained=command_valid=0;ndraw=nvertex=0;object_id=-1;
+    active=1;failed=0;failure=NULL;retained=command_valid=0;ndraw=nvertex=nstar_pixels=0;object_id=-1;
     gpu_world_surface_clear();++frame;
     qa_animation_begin();
     if(!cache_initialized){gw_cache_init(&texture_cache,MAX_TEXTURES,GW_CACHE_DEFAULT_BYTES,retire_texture,NULL);cache_initialized=1;}
@@ -883,6 +912,11 @@ static int submit(void) {
             if((unsigned)n>generated_max_refs)generated_max_refs=(unsigned)n;
         }
         glDrawArrays(GL_TRIANGLES,d->first,d->count);
+    }
+    if(nstar_pixels){
+        glUseProgram(star_program);glUniform1i(glGetUniformLocation(star_program,"pal"),1);
+        glBufferData(GL_ARRAY_BUFFER,(size_t)nstar_pixels*sizeof(Vertex),star_pixels,GL_STREAM_DRAW);
+        glDrawArrays(GL_POINTS,0,nstar_pixels);
     }
     GLenum error=glGetError();bridge_restore(&state);SDL_SetRenderTarget(renderer,old);
     if(inject("submit"))error=GL_OUT_OF_MEMORY;

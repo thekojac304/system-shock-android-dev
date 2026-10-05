@@ -128,6 +128,7 @@ int fr_rend(frc *view) {
     }
 
     // printf(" fr_pipe_end\n");
+    fr_render_stars(); /* Star pixels use the completed indexed world as their mask. */
     gpu_world_end(gpu_previous);
     horror_visuals_end_view(visual_previous);
     horror_visuals_measure(visual_start);

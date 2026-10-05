@@ -11,6 +11,7 @@ int gpu_world_active(void);
 void gpu_world_reject(const char *reason);
 void gpu_world_face(int n, g3s_phandle *p, grs_bitmap *bm, int lit);
 void gpu_world_polygon(long color, int n, g3s_phandle *p, int gouraud);
+void gpu_world_star_pixel(int x, int y, unsigned char index);
 void gpu_world_sprite(grs_bitmap *bm, grs_vertex **p, g3s_phandle anchor, const unsigned char *clut);
 void gpu_world_object(int id, int type, int lit);
 void gpu_world_object_end(void);
@@ -27,6 +28,7 @@ void gpu_world_presenter_lost(void);
 #define gpu_world_reject(reason) ((void)0)
 #define gpu_world_face(n,p,bm,lit) ((void)0)
 #define gpu_world_polygon(c,n,p,g) ((void)0)
+#define gpu_world_star_pixel(x,y,index) ((void)0)
 #define gpu_world_sprite(bm,p,a,c) ((void)0)
 #define gpu_world_object(id,type,lit) ((void)0)
 #define gpu_world_object_end() ((void)0)
