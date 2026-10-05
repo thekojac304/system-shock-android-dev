@@ -22,7 +22,7 @@ VERSION = 1
 MAX_LIGHTS = 4
 MAX_POLYS = 2                 # accepted AUTHOR1E output on levels 1 and 6
 MAX_PLANES = 8
-MASK_IDS = (20, 35, 36, 82, 101, 144, 185, 215, 216, 217)
+MASK_IDS = (20, 26, 35, 36, 52, 82, 99, 101, 144, 185, 188, 215, 216, 217)
 
 
 def encode_level(level, archive, rules):
@@ -144,9 +144,11 @@ def encode_level(level, archive, rules):
     masks = rules['reviewed_emissive_indices']
     if tuple(sorted(int(i) for i in masks)) != tuple(sorted(MASK_IDS)):
         raise ValueError('Reviewed mask inventory changed')
+    active_masks = set(rules['classes']['luminous_fixture']) | set(
+        rules.get('deck_luminous_fixture', {}).get(str(level), []))
     for material in MASK_IDS:
         bits = bytearray(256)
-        for index in masks[str(material)]:
+        for index in masks[str(material)] if material in active_masks else ():
             if not 0 <= index <= 255:
                 raise ValueError('Invalid emissive palette index')
             bits[index] = 1
@@ -168,9 +170,13 @@ def main():
     args = parser.parse_args()
     archive = args.archive.read_bytes()
     rules = json.loads((ROOT / 'profiles/horror-author1/rules.json').read_text(encoding='utf-8'))
-    results = [encode_level(level, archive, rules) for level in (1, 6)]
+    levels = (0, 1, 2, 4, 5, 6, 9)
+    results = [encode_level(level, archive, rules) for level in levels]
     args.output.mkdir(parents=True, exist_ok=True)
-    for (blob, summary), level in zip(results, (1, 6)):
+    for old in args.output.glob('level-*.bin'):
+        if old.stem.removeprefix('level-').isdigit() and int(old.stem[6:]) not in levels:
+            old.unlink()
+    for (blob, summary), level in zip(results, levels):
         (args.output / f'level-{level}.bin').write_bytes(blob)
         print(json.dumps(summary, sort_keys=True))
 

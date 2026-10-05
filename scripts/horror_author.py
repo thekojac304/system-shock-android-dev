@@ -339,9 +339,9 @@ def emissive_mask_audit(texture_bytes,rules):
     if digest(texture_bytes)!=rules['reviewed_texture_sha256']:
         raise ValueError('Reviewed emissive masks require the exact TEXTURE.RES source')
     resources=ARCHIVE(texture_bytes,1000,1363);result={}
-    housing={20:{206,207,222,223},35:{108,109},36:{108,109},
+    housing={20:{206,207,222,223},26:{54,57,58,59,60},35:{108,109},36:{108,109},52:{54,56,58,60},99:{220,221,222,223},
         82:{69,70,71,72,73},101:{213,214,215,216},
-        144:{217,218,219},185:{189,190,191,223},
+        144:{217,218,219},185:{189,190,191,223},188:{220,221,222,223},
         215:{189,190,191},216:{189,190,191},217:{217,218,219,220,221}}
     for key,indices in sorted(rules['reviewed_emissive_indices'].items(),key=lambda v:int(v[0])):
         tid=int(key);raw=resources[1000+tid];offset=int.from_bytes(raw[2:6],'little')
@@ -480,6 +480,8 @@ def generate(data,props,rules,objprops=None):
     for portal in portals:
         portal['connected_regions']=sorted({member[i] for i in portal['tiles']})
     classes={tid:kind for kind,ids in rules['classes'].items() for tid in ids}
+    for tid in rules.get('deck_luminous_fixture',{}).get(str(level),[]):
+        classes[tid]='luminous_fixture'
     archetype=copy.deepcopy(rules['archetypes'][str(level)])
     candidates=[];lights=[];warnings=[]
     for i,t in tiles.items():
@@ -597,7 +599,7 @@ def generate(data,props,rules,objprops=None):
         'Face-table apertures and sloped edge heights model static optical connections; internal complex walls remain unresolved.',
         'Receiver tiles use five samples; fragment-safe masks and dynamic invalidation required before runtime.',
         'All door portals block generated light; open-door spill is not implemented.',
-        'Only ten reviewed fixture textures carry source-index emissive masks; other mixed art remains non-emissive.',
+        'Only reviewed fixture textures carry source-index emissive masks; other mixed art remains non-emissive.',
         'No automatic fog enabled; no generic power/alarm/SHODAN color state invented.',
         'Fullbright render flags and UNLIT instances are inventoried, not universal light emitters.'])
     if objprops is None:warnings.append('OBJPROP omitted: generic TEXTPOLY display and unlit detection unavailable.')
@@ -627,7 +629,7 @@ def generate(data,props,rules,objprops=None):
 
 def validate(p):
     validate_contract(p,SCHEMA)
-    if p.get('schema_version')!=VERSION or p.get('level_id') not in (1,6):
+    if p.get('schema_version')!=VERSION or p.get('level_id') not in (0,1,2,3,4,5,6,9):
         raise ValueError('Unsupported profile version/level')
     encode(p)  # Reject NaN/infinity.
     for field in ('baseline_signature','rules_signature','texture_properties_signature'):
@@ -723,7 +725,7 @@ def svg_map(p,mode):
     suppressed=Counter(c['tile'] for c in p['diagnostics']['candidates'] if c['policy'].startswith('suppressed'))
     clusters=Counter(c['tile'] for c in p['diagnostics']['candidates'] if c['policy']=='suppressed_fixture_cluster')
     colors={'luminous_fixture':'#a6fbff','monitor_display':'#46bad0','clinical_panel':'#4876ae',
-        'industrial_wall':'#b28a47','decorative':'#976675','damaged_surface':'#b73536','organic_grove':'#389957','machinery':'#8b7eb9','unknown':'#494952'}
+        'industrial_wall':'#b28a47','decorative':'#976675','non_emissive_bright':'#5a6070','damaged_surface':'#b73536','organic_grove':'#389957','machinery':'#8b7eb9','unknown':'#494952'}
     result=['<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1120" viewBox="0 0 1024 1120">',
         '<rect width="1024" height="1120" fill="#11151d"/>',
         f'<text x="20" y="26" fill="white" font-size="20">HORROR-AUTHOR1 | Level {p["level_id"]} | {mode} | DIAGNOSTIC</text>']
@@ -783,7 +785,7 @@ def main():
     parser.add_argument('--textprop',type=Path,required=True)
     parser.add_argument('--objprop',type=Path)
     parser.add_argument('--output',type=Path,required=True)
-    parser.add_argument('--levels',type=int,nargs='+',default=[1,6],choices=[1,6])
+    parser.add_argument('--levels',type=int,nargs='+',default=[1,6],choices=[0,1,2,3,4,5,6,9])
     parser.add_argument('--rules',type=Path,default=RULES)
     parser.add_argument('--overlay',type=Path)
     args=parser.parse_args()

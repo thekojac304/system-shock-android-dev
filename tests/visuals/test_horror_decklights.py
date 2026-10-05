@@ -12,18 +12,21 @@ ROOT = Path(__file__).resolve().parents[2]
 QA_ASSETS = ROOT / "AndroidProject/app/src/qa/assets/horror-generated"
 QA_APK = ROOT / "AndroidProject/app/build/outputs/apk/qa/app-qa.apk"
 HEADER = struct.Struct("<4s6I32s32s")
+ACCEPTED = (0, 1, 2, 4, 5, 6, 9)
 
 
 class DecklightCoverage(unittest.TestCase):
-    def test_accepted_rules_cover_only_anchor_decks(self):
+    def test_rules_exclude_security_and_engineering(self):
         rules = json.loads((ROOT / "profiles/horror-author1/rules.json").read_text())
-        self.assertEqual({int(level) for level in rules["archetypes"]}, {1, 6})
+        self.assertEqual({int(level) for level in rules["archetypes"]}, {0, 1, 2, 3, 4, 5, 6, 9})
+        self.assertNotIn('7', rules['deck_luminous_fixture'])
+        self.assertNotIn('8', rules['deck_luminous_fixture'])
 
     def test_runtime_assets_are_bounded_signed_and_complete(self):
         if not QA_ASSETS.is_dir():
             self.skipTest("QA assets require the user's owned archive")
         assets = sorted(QA_ASSETS.glob("level-*.bin"))
-        self.assertEqual([p.name for p in assets], ["level-1.bin", "level-6.bin"])
+        self.assertEqual([p.name for p in assets], [f"level-{level}.bin" for level in ACCEPTED])
         for asset in assets:
             blob = asset.read_bytes()
             magic, version, level, lights, surfaces, regions, crc, baseline, rules = HEADER.unpack_from(blob)
@@ -47,6 +50,7 @@ class DecklightCoverage(unittest.TestCase):
                     re.findall(r'\{(\d+),"([0-9a-f]{64})"\}', registry)}
         assets = sorted(QA_ASSETS.glob("level-*.bin"))
         self.assertEqual(set(accepted), {int(p.stem.split("-")[1]) for p in assets})
+        self.assertEqual(set(accepted), set(ACCEPTED))
         for asset in assets:
             _, _, level, _, _, _, _, baseline, _ = HEADER.unpack_from(asset.read_bytes())
             self.assertEqual(baseline, accepted[level])
@@ -57,8 +61,7 @@ class DecklightCoverage(unittest.TestCase):
             self.skipTest("QA APK has not been built")
         with zipfile.ZipFile(QA_APK) as apk:
             names = sorted(n for n in apk.namelist() if "horror-generated/" in n)
-            self.assertEqual(names, ["assets/horror-generated/level-1.bin",
-                                     "assets/horror-generated/level-6.bin"])
+            self.assertEqual(names, [f"assets/horror-generated/level-{level}.bin" for level in ACCEPTED])
             for name in names:
                 self.assertEqual(apk.read(name), (QA_ASSETS / Path(name).name).read_bytes())
 

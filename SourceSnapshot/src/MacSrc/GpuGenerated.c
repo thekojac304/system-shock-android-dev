@@ -10,10 +10,15 @@
 
 static const char *error_text="none";
 static const struct { int level; const char *baseline; } accepted_profiles[]={
+    {0,"2751b936d4890c989ad65c5c8e4e9973364a48b596fd499709b8566ddd5e92cf"},
     {1,"ebdb77338941febd90b424bd456435ce4e3cd81bfcc5f0c7bb9ee0d1957c41e7"},
-    {6,"e481e2988d22704112ee5366029251abe93f506e35c37ec5a5efc8690d238c12"}
+    {2,"ba8c38b66448bb53f7ee3a8368313d62fda275b6f6c2adaec313f7dd360afa98"},
+    {4,"710680e3336a3affb43265414491504e9354e96c5af91c30c21781e0c41707a5"},
+    {5,"e6def204237cdbf7613479a0d4850b77e0d793aae112f96fbe464f12142b4b52"},
+    {6,"e481e2988d22704112ee5366029251abe93f506e35c37ec5a5efc8690d238c12"},
+    {9,"7ffb48e8e0756d805d89171f742268ee681f2057dd7492e68d7dde449859410f"}
 };
-static const char *rules="bb9f391b82a3084d030251f18dc9c8b124992da8f5ef6d2f22356f840f16f466";
+static const char *rules="d3c475c9cce9db223ff055bfca80dd38ff1131d05c3dad17efb6261600774b97";
 static const char *accepted_baseline(int level){
     for(size_t i=0;i<sizeof(accepted_profiles)/sizeof(accepted_profiles[0]);i++)
         if(accepted_profiles[i].level==level)return accepted_profiles[i].baseline;
@@ -48,7 +53,7 @@ void gg_profile_free(GgProfile *p){
 }
 const char *gg_profile_error(void){return error_text;}
 int gg_mask_row(int material){
-    static const int ids[]={20,35,36,82,101,144,185,215,216,217};
+    static const int ids[]={20,26,35,36,52,82,99,101,144,185,188,215,216,217};
     for(int i=0;i<GG_MASKS;i++)if(ids[i]==material)return i;
     return -1;
 }

@@ -30,10 +30,20 @@ if (-not $AndroidSdk) {
 if ($Variant -eq 'qa') {
     $GeneratedInputs = @(
         (Join-Path $Root 'dist\audio2\owned-ARCHIVE.DAT'),
+        (Join-Path $Root 'dist\horror-author1d\generated\level-0.generated.json'),
         (Join-Path $Root 'dist\horror-author1d\generated\level-1.generated.json'),
+        (Join-Path $Root 'dist\horror-author1d\generated\level-2.generated.json'),
+        (Join-Path $Root 'dist\horror-author1d\generated\level-4.generated.json'),
+        (Join-Path $Root 'dist\horror-author1d\generated\level-5.generated.json'),
         (Join-Path $Root 'dist\horror-author1d\generated\level-6.generated.json'),
+        (Join-Path $Root 'dist\horror-author1d\generated\level-9.generated.json'),
+        (Join-Path $Root 'dist\horror-author1e\level-0.partial.json'),
         (Join-Path $Root 'dist\horror-author1e\level-1.partial.json'),
-        (Join-Path $Root 'dist\horror-author1e\level-6.partial.json')
+        (Join-Path $Root 'dist\horror-author1e\level-2.partial.json'),
+        (Join-Path $Root 'dist\horror-author1e\level-4.partial.json'),
+        (Join-Path $Root 'dist\horror-author1e\level-5.partial.json'),
+        (Join-Path $Root 'dist\horror-author1e\level-6.partial.json'),
+        (Join-Path $Root 'dist\horror-author1e\level-9.partial.json')
     )
     $GeneratedAssets = Join-Path $Root 'AndroidProject\app\src\qa\assets\horror-generated'
     $InputsPresent = @($GeneratedInputs | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf }).Count
