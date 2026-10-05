@@ -34,6 +34,32 @@ class InferenceTests(unittest.TestCase):
     def profile(self):
         return h.generate(data([tile(x,2) for x in range(2,10)]),self.props,self.rules)
 
+    def test_unused_friend_slope_wall_slot_and_invalid_slot_rejection(self):
+        base=4700
+        info=bytearray(58)
+        struct.pack_into('<II',info,0,64,64)
+        struct.pack_into('<I',info,16,3)
+        raw=bytearray(4096*16)
+        offset=2109*16
+        raw[offset]=7
+        raw[offset+6:offset+8]=struct.pack('<H',54)
+        raw[offset+9]=1  # Friend-material external walls; no slope internal wall.
+        res={base+i:b'' for i in (2,4,5,7,8,19,20,22,42)}
+        res[base+2]=struct.pack('<I',11)
+        res[base+4]=bytes(info)
+        res[base+7]=struct.pack('<54H',*range(54))
+        res[base+8]=bytes(27)
+        res[base+5]=bytes(raw)
+        loaded=h.load_level(res,7,self.props)
+        self.assertIsNone(loaded['tiles'][2109]['textures']['wall'])
+        self.assertEqual(loaded['tiles'][2109]['textures']['floor'],0)
+        for terrain,friend in ((7,0),(2,1)):
+            raw[offset]=terrain
+            raw[offset+9]=friend
+            res[base+5]=bytes(raw)
+            with self.assertRaisesRegex(ValueError,'Unresolved texture slot'):
+                h.load_level(res,7,self.props)
+
     def test_closed_door_and_wall_separate_receivers(self):
         ts=[tile(x,2) for x in (2,3,4,5,6,8)]
         door=dict(id=7,tile=132,door={},position=[4.5,2.5,1],obclass=10,subclass=0,type=0,triple=0xa0000)

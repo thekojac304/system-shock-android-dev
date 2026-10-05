@@ -167,11 +167,23 @@ def load_level(res, level, props):
             raise ValueError('Unknown terrain type')
         packed=int.from_bytes(t[6:8],'little')
         slots={'wall':packed&63,'floor':packed>>11,'ceiling':(packed>>6)&31}
-        if any(s>=len(ids) or ids[s]>=len(props) for s in slots.values()):
-            raise ValueError('Unresolved texture slot')
+        textures={}
+        for face,s in slots.items():
+            if s>=len(ids):
+                # A friend-material slope draws each external wall with its
+                # neighbor's slot and has no internal wall of its own. Its
+                # stored wall slot is unused, so keep it absent rather than
+                # inventing a resource ID for an out-of-range table entry.
+                if face=='wall' and t[9]&1 and 6<=t[0]<=17:
+                    textures[face]=None
+                    continue
+                raise ValueError('Unresolved texture slot')
+            if ids[s]>=len(props):
+                raise ValueError('Unresolved texture slot')
+            textures[face]=ids[s]
         tiles[i]=dict(id=i,x=i%w,y=i//w,type=t[0],height_shift=zshift,floor=(t[1]&31)/2**zshift,
             ceiling=(32-(t[2]&31))/2**zshift,param=t[3],mirror=(t[9]>>2)&3,
-            textures={face:ids[s] for face,s in slots.items()},
+            textures=textures,
             neighbor_material=bool(t[9]&1),family_bit=bool(t[8]&128),
             darkness=[t[10]&15,t[11]&15],transient=[t[15]&15,t[15]>>4],
             fullbright=(t[11]>>4)&7,music=t[9]>>5,
@@ -629,7 +641,7 @@ def generate(data,props,rules,objprops=None):
 
 def validate(p):
     validate_contract(p,SCHEMA)
-    if p.get('schema_version')!=VERSION or p.get('level_id') not in (0,1,2,3,4,5,6,9):
+    if p.get('schema_version')!=VERSION or p.get('level_id') not in (0,1,2,3,4,5,6,7,9):
         raise ValueError('Unsupported profile version/level')
     encode(p)  # Reject NaN/infinity.
     for field in ('baseline_signature','rules_signature','texture_properties_signature'):
@@ -785,7 +797,7 @@ def main():
     parser.add_argument('--textprop',type=Path,required=True)
     parser.add_argument('--objprop',type=Path)
     parser.add_argument('--output',type=Path,required=True)
-    parser.add_argument('--levels',type=int,nargs='+',default=[1,6],choices=[0,1,2,3,4,5,6,9])
+    parser.add_argument('--levels',type=int,nargs='+',default=[1,6],choices=[0,1,2,3,4,5,6,7,9])
     parser.add_argument('--rules',type=Path,default=RULES)
     parser.add_argument('--overlay',type=Path)
     args=parser.parse_args()

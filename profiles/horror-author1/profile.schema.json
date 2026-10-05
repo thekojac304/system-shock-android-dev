@@ -7,7 +7,7 @@
   "required":["schema_version","generator_version","origin","level_id","baseline_signature","rules_signature","texture_properties_signature","object_properties_signature","units","defaults","regions","lights","material_rules","dynamic_overrides","diagnostics"],
   "properties":{
     "schema_version":{"const":1}, "generator_version":{"type":"string"},
-    "origin":{"$ref":"#/$defs/origin"}, "level_id":{"enum":[0,1,2,3,4,5,6,9]},
+    "origin":{"$ref":"#/$defs/origin"}, "level_id":{"enum":[0,1,2,3,4,5,6,7,9]},
     "baseline_signature":{"$ref":"#/$defs/hash"}, "rules_signature":{"$ref":"#/$defs/hash"},
     "texture_properties_signature":{"$ref":"#/$defs/hash"},
     "object_properties_signature":{"anyOf":[{"$ref":"#/$defs/hash"},{"type":"null"}]},

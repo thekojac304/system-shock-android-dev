@@ -16,9 +16,10 @@ static const struct { int level; const char *baseline; } accepted_profiles[]={
     {4,"710680e3336a3affb43265414491504e9354e96c5af91c30c21781e0c41707a5"},
     {5,"e6def204237cdbf7613479a0d4850b77e0d793aae112f96fbe464f12142b4b52"},
     {6,"e481e2988d22704112ee5366029251abe93f506e35c37ec5a5efc8690d238c12"},
+    {7,"13a285ffff1d736119c3fc11182e47f114b3ffb9364aec2925fefa180a6a7799"},
     {9,"7ffb48e8e0756d805d89171f742268ee681f2057dd7492e68d7dde449859410f"}
 };
-static const char *rules="d3c475c9cce9db223ff055bfca80dd38ff1131d05c3dad17efb6261600774b97";
+static const char *rules="f73398740086352b13612ddeedc3de3983f67574b40b1b4df218ecbcba7c7987";
 static const char *accepted_baseline(int level){
     for(size_t i=0;i<sizeof(accepted_profiles)/sizeof(accepted_profiles[0]);i++)
         if(accepted_profiles[i].level==level)return accepted_profiles[i].baseline;
@@ -53,7 +54,7 @@ void gg_profile_free(GgProfile *p){
 }
 const char *gg_profile_error(void){return error_text;}
 int gg_mask_row(int material){
-    static const int ids[]={20,26,35,36,52,82,99,101,144,185,188,215,216,217};
+    static const int ids[]={20,26,35,36,52,82,99,101,144,155,185,188,215,216,217};
     for(int i=0;i<GG_MASKS;i++)if(ids[i]==material)return i;
     return -1;
 }

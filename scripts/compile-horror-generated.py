@@ -22,7 +22,7 @@ VERSION = 1
 MAX_LIGHTS = 4
 MAX_POLYS = 2                 # accepted AUTHOR1E output on levels 1 and 6
 MAX_PLANES = 8
-MASK_IDS = (20, 26, 35, 36, 52, 82, 99, 101, 144, 185, 188, 215, 216, 217)
+MASK_IDS = (20, 26, 35, 36, 52, 82, 99, 101, 144, 155, 185, 188, 215, 216, 217)
 
 
 def encode_level(level, archive, rules):
@@ -170,7 +170,7 @@ def main():
     args = parser.parse_args()
     archive = args.archive.read_bytes()
     rules = json.loads((ROOT / 'profiles/horror-author1/rules.json').read_text(encoding='utf-8'))
-    levels = (0, 1, 2, 4, 5, 6, 9)
+    levels = (0, 1, 2, 4, 5, 6, 7, 9)
     results = [encode_level(level, archive, rules) for level in levels]
     args.output.mkdir(parents=True, exist_ok=True)
     for old in args.output.glob('level-*.bin'):

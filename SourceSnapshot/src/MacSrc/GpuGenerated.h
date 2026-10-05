@@ -4,7 +4,7 @@
 #include "GpuSurfaceId.h"
 #include <stdint.h>
 
-enum { GG_MAX_LIGHTS=4, GG_MAX_POLYGONS=2, GG_MAX_PLANES=8, GG_MASKS=14 };
+enum { GG_MAX_LIGHTS=4, GG_MAX_POLYGONS=2, GG_MAX_PLANES=8, GG_MASKS=15 };
 typedef struct {
     float position[3],rgb[3],intensity,radius;
     int32_t material,source_object;

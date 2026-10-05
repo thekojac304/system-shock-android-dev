@@ -12,14 +12,13 @@ ROOT = Path(__file__).resolve().parents[2]
 QA_ASSETS = ROOT / "AndroidProject/app/src/qa/assets/horror-generated"
 QA_APK = ROOT / "AndroidProject/app/build/outputs/apk/qa/app-qa.apk"
 HEADER = struct.Struct("<4s6I32s32s")
-ACCEPTED = (0, 1, 2, 4, 5, 6, 9)
+ACCEPTED = (0, 1, 2, 4, 5, 6, 7, 9)
 
 
 class DecklightCoverage(unittest.TestCase):
-    def test_rules_exclude_security_and_engineering(self):
+    def test_rules_exclude_security(self):
         rules = json.loads((ROOT / "profiles/horror-author1/rules.json").read_text())
-        self.assertEqual({int(level) for level in rules["archetypes"]}, {0, 1, 2, 3, 4, 5, 6, 9})
-        self.assertNotIn('7', rules['deck_luminous_fixture'])
+        self.assertEqual({int(level) for level in rules["archetypes"]}, {0, 1, 2, 3, 4, 5, 6, 7, 9})
         self.assertNotIn('8', rules['deck_luminous_fixture'])
 
     def test_runtime_assets_are_bounded_signed_and_complete(self):
