@@ -21,11 +21,11 @@ android {
         buildConfigField 'boolean', 'AUDIO_DIAGNOSTICS', 'false'
         // Stable v1 starts a clean Android application identity so it can coexist
         // with the historical pre-release package com.rp5np.systemshock.
-        applicationId "io.github.raposomiguel50.systemshock"
+        applicationId "io.github.thekojac304.systemshock"
         minSdkVersion 33
         targetSdkVersion 33
-        versionCode 10000
-        versionName "1.0.0"
+        versionCode 10100
+        versionName "1.1.0-beta.1"
 
         externalNativeBuild {
             cmake {
