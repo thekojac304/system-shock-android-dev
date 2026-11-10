@@ -69,6 +69,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "mfdart.h" // for the slider bar
 
 #include "MacTune.h"
+#include "ExternalMusic.h"
+#include "AmbientDirector.h"
 
 #define LOAD_BUTTON          0
 #define SAVE_BUTTON          1
@@ -1335,6 +1337,57 @@ void quit_verify_init(void) { verify_screen_init(quit_verify_pushbutton_handler,
 uchar curr_vol_lev = 100;
 uchar curr_sfx_vol = 100;
 uchar curr_alog_vol = 100;
+
+#ifdef __ANDROID__
+/* The full-surface audio page drives the same legacy volume state and quest
+   variables as the original sound screen. It does not replace that screen. */
+void touch_game_audio_snapshot(int out[7]) {
+    out[0]=gShockPrefs.soMasterVolume;
+    out[1]=curr_vol_lev;
+    out[2]=curr_sfx_vol;
+    out[3]=gShockPrefs.soAmbientVolume;
+    out[4]=gShockPrefs.soSoundtrack==SOUNDTRACK_REMAKE;
+    out[5]=gShockPrefs.soDynamicMusic;
+    out[6]=gShockPrefs.soEnhancedAmbience;
+}
+void touch_game_audio_apply(const int in[7]) {
+    extern void rp5np_audio_set_master_volume(int percent);
+    int master=in[0]<0?0:in[0]>100?100:in[0];
+    int music=in[1]<0?0:in[1]>100?100:in[1];
+    int sfx=in[2]<0?0:in[2]>100?100:in[2];
+    int ambient=in[3]<0?0:in[3]>100?100:in[3];
+    gShockPrefs.soMasterVolume=master;
+    gShockPrefs.soAmbientVolume=ambient;
+    rp5np_audio_set_master_volume(master);
+    if (curr_vol_lev!=music) {
+        curr_vol_lev=music;
+        gShockPrefs.soMusicVolume=music;
+        gShockPrefs.soBackMusic=music>0;
+        music_on=music>0;
+        QUESTVAR_SET(MUSIC_VOLUME_QVAR,(music*music)/100);
+        MacTuneUpdateVolume();
+        if (!music_on) ExternalMusicSuspend();
+    }
+    if (curr_sfx_vol!=sfx) {
+        curr_sfx_vol=sfx;
+        gShockPrefs.soSfxVolume=sfx;
+        gShockPrefs.soSoundFX=sfx>0;
+        sfx_on=sfx>0;
+        QUESTVAR_SET(SFX_VOLUME_QVAR,(sfx*sfx)/100);
+        sound_frame_update();
+        if (!sfx_on) stop_digi_fx();
+    }
+    int mode=in[4]?SOUNDTRACK_REMAKE:SOUNDTRACK_ORIGINAL;
+    if (mode!=gShockPrefs.soSoundtrack) {
+        gShockPrefs.soSoundtrack=mode;
+        ExternalMusicUpdate(mode,player_struct.level,0,curr_vol_lev);
+    }
+    gShockPrefs.soDynamicMusic=!!in[5];
+    ExternalMusicSetDynamic(gShockPrefs.soDynamicMusic);
+    gShockPrefs.soEnhancedAmbience=!!in[6];
+    if (!gShockPrefs.soEnhancedAmbience) AmbientDirectorSuspend();
+}
+#endif
 
 void recompute_music_level(ushort vol) {
     //   curr_vol_lev=long_sqrt(100*vol);

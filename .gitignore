@@ -5,6 +5,9 @@ AndroidProject/local.properties
 AndroidProject/app/.cxx/
 AndroidProject/app/build/
 dist/
+# AUDIO4 local analysis / copyrighted audition output (default lives in dist/).
+/audio4-output/
+/scripts/audio4/__pycache__/
 AndroidProject/app/src/qa/assets/horror-generated/
 *.apk
 *.aab

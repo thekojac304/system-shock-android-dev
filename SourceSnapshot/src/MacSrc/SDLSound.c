@@ -1,5 +1,7 @@
 #include "Xmi.h"
 #include "MusicDevice.h"
+#include "AmbientDirector.h"
+#include "AudioMasterGain.h"
 
 static snd_digi_parms digi_parms_by_channel[SND_MAX_SAMPLES];
 
@@ -22,6 +24,12 @@ extern void MusicCallback(void *userdata, Uint8 *stream, int len);
 #ifdef __ANDROID__
 #define RP5NP_POSTMIX_SCRATCH_BYTES 8192
 static Uint8 rp5np_postmix_scratch[RP5NP_POSTMIX_SCRATCH_BYTES];
+static SDL_atomic_t rp5np_master_volume = {100};
+void rp5np_audio_set_master_volume(int percent) {
+    if (percent < 0) percent = 0;
+    if (percent > 100) percent = 100;
+    SDL_AtomicSet(&rp5np_master_volume, percent);
+}
 static bool rp5np_first_sfx_logged = false;
 
 /* Keep SDL_mixer ownership inside the sound layer. Game/cutscene code uses
@@ -36,11 +44,10 @@ static void rp5np_external_stream_postmix(void *userdata, Uint8 *stream, int len
 #ifdef RP5NP_AUDIO_DIAGNOSTICS
     rp5np_audio_diag_aux(active_stream ? SDL_AudioStreamAvailable(active_stream) : 0);
 #endif
-    if (active_stream == NULL || len <= 0)
-        return;
+    if (len <= 0) return;
 
     int offset = 0;
-    while (offset < len) {
+    while (active_stream && offset < len) {
         int available = SDL_AudioStreamAvailable(active_stream);
         if (available <= 0)
             break;
@@ -66,6 +73,9 @@ static void rp5np_external_stream_postmix(void *userdata, Uint8 *stream, int len
         SDL_MixAudioFormat(stream + offset, rp5np_postmix_scratch, AUDIO_S16SYS, (Uint32)got, SDL_MIX_MAXVOLUME);
         offset += got;
     }
+    /* Final bus gain includes stock MIDI, remake music, SFX, ambience, and
+       the auxiliary movie/audiolog stream exactly once. The device is S16. */
+    AudioMasterGainS16(stream,(size_t)len,SDL_AtomicGet(&rp5np_master_volume));
 }
 #endif
 
@@ -105,7 +115,8 @@ int snd_start_digital(void) {
     SDL_Log("RP5NP_AUDIO_ARCHITECTURE=SDL_MIXER_SINGLE_DEVICE");
     SDL_Log("RP5NP_AUDIO_BUFFER_FRAMES=1024 nominal_ms=21.333");
 
-    Mix_AllocateChannels(SND_MAX_SAMPLES);
+    Mix_AllocateChannels(SND_MAX_SAMPLES + 2);
+    AmbientDirectorInit(SND_MAX_SAMPLES);
     Mix_HookMusic(MusicCallback, (void *)&MusicDev);
     Mix_SetPostMix(rp5np_external_stream_postmix, (void *)&cutscene_audiostream);
     Mix_VolumeMusic(MIX_MAX_VOLUME);
@@ -116,6 +127,7 @@ int snd_start_digital(void) {
 
     InitReadXMI();
     atexit(Mix_CloseAudio);
+    atexit(AmbientDirectorShutdown);
     return OK;
 #else
     SDL_AudioSpec spec, obtained;
@@ -176,7 +188,14 @@ int snd_sample_play(int snd_ref, int len, uchar *smp, struct snd_digi_parms *dpr
     }
 
     int loops = dprm->loops > 0 ? dprm->loops - 1 : -1;
-    int channel = Mix_PlayChannel(-1, sample, loops);
+    /* The two AUDIO5 voices live after the legacy sample range. Keep the
+       original first-free SFX policy inside its fixed bookkeeping arrays. */
+    int channel = -1;
+    for (int candidate = 0; candidate < SND_MAX_SAMPLES; ++candidate) {
+        if (Mix_Playing(candidate)) continue;
+        channel = Mix_PlayChannel(candidate, sample, loops);
+        if (channel >= 0) break;
+    }
 #ifdef RP5NP_AUDIO_DIAGNOSTICS
     AUDIO_TRACE("play_return ref=%d chunk=%p channel=%d playing=%d paused=%d music_paused=%d",
                 snd_ref, (void *)sample, channel, Mix_Playing(-1), Mix_Paused(-1), Mix_PausedMusic());

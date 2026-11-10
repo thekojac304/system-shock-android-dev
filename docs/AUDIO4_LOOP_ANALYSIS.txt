@@ -1,0 +1,228 @@
+AUDIO4 - Remake soundtrack loop analysis and local auditions
+2026-10-04 | UNREVIEWED / NOT HARDWARE-VALIDATED
+
+OUTCOME
+22 sources found (11 Explore + 11 Combat), none of the expected musical variants missing.
+66 numerical candidates, 132 short WAVs (877.1 MiB), plus a full three-pass
+Medical Explore A render. No loop is approved or certified seamless.
+Human selection by ear is the remaining decision; runtime integration is separate.
+
+SOURCE AND INSTALLATION AUDIT
+C:\Users\<user>\Downloads\system_shock_soundtrack_mp3\system_shock_soundtrack_digital
+
+The repository-root music directory contains no MP3s. dist/audio31/runtime/music/
+remake contains four 60,836-byte test fixtures; hashes do not match the owned OST.
+Those fixtures were excluded. This report establishes the PC source set, not the
+current files on an Android device. No device installation was read or modified.
+
+Legacy <deck>.mp3 is Explore; explicit <deck>_explore.mp3 would take precedence.
+Medical Explore and ten Combat tracks retain original album titles, so their
+canonical runtime filenames are absent in this source folder. They are mapped
+by the analyzer only. No file was renamed, moved, or transcoded in place.
+
+All 22: 44,100 Hz, stereo, 320,000 bit/s. Durations below are container seconds;
+JSON also preserves exact decoded PCM duration, frame counts and SHA-256.
+
+medical_explore        261.722041s  02 The Ruined Infirmary (Medical [Explore]).mp3
+medical_combat         192.919615s  medical_combat.mp3
+research_explore       249.318209s  research.mp3
+research_combat        212.790635s  05 X-22 Interlocks Engaged (Research [Combat]).mp3
+reactor_explore        264.824830s  reactor.mp3
+reactor_combat         202.111156s  07 Fusion Energy (Reactor [Combat]).mp3
+maintenance_explore    254.122109s  maintenance.mp3
+maintenance_combat     214.165896s  09 Demodulation (Maintenance [Combat]).mp3
+storage_explore        246.854263s  storage.mp3
+storage_combat         201.887052s  11 L4 Cache Hit (Storage [Combat]).mp3
+flightdeck_explore     194.601156s  flightdeck.mp3
+flightdeck_combat      259.434150s  13 Prophet Through Synthesis (Flight Deck [Combat]).mp3
+executive_explore      239.455760s  executive.mp3
+executive_combat       223.460907s  15 Master Jettison (Executive [Combat]).mp3
+groves_explore         239.313923s  groves.mp3
+groves_combat          230.929841s  17 Perfection Through Genetics (Groves [Combat]).mp3
+engineering_explore    221.995986s  engineering.mp3
+engineering_combat     241.152154s  19 Terminal Interference (Systems Engineering [Combat]).mp3
+security_explore       232.837324s  security.mp3
+security_combat        198.016009s  21 Face Your Executioner (Security [Combat]).mp3
+bridge_explore         239.868639s  bridge.mp3
+bridge_combat          210.533311s  23 Throne Room of a God (Bridge [Combat]).mp3
+
+Expected variants missing: NONE.
+Excluded non-deck tracks:
+  01 Look at You, Hacker (Intro).mp3
+  24 Domain Linked (Cyberspace).mp3
+  25 Interlude in Motion (Elevator).mp3
+
+TOOLS (ALREADY INSTALLED; NO NEW DEPENDENCIES)
+  python: 3.12.14
+  numpy: 2.3.5
+  ffmpeg: ffmpeg version N-121198-g56c14f2311 Copyright (c) 2000-2025 the FFmpeg developers
+  ffprobe: ffprobe version N-121198-g56c14f2311 Copyright (c) 2007-2025 the FFmpeg developers
+  decoder: FFmpeg native MP3 -> float32 PCM
+
+ALGORITHM AND RANKING
+Native-rate float PCM from FFmpeg for refinement and audition; separate 11025-Hz
+features use 2048-sample Hann FFT / 220-sample hop, 32 log-frequency bands,
+positive flux, RMS, stereo balance, entropy-weighted pitch-class similarity.
+Conservative body excludes 10% head/tail plus low-energy tail margins. This is
+a heuristic and can miss authored sections; it is not semantic music analysis.
+Tempo/phase from flux autocorrelation; confidence gates beat and 4-beat priors.
+Meter/downbeats are NOT proven. Tempo can be half/double rate or drift.
+Coarse half-second + beat grid, spectral prefilter, context comparison, then
+24 diverse seeds refined +/-160ms and native stereo waveform/jump refinement.
+Min span defaults to 25% of decoded duration (48-66s here); configurable per track.
+Costs combine spectral, harmonic, loudness, stereo, rhythm, onset, beat/phrase
+and waveform continuity; score 100/(1+cost) is an audition rank, NOT a quality %.
+Compare hard/25/50/100/150/250ms linear overlaps using rendered roughness, jump,
+energy dip, and a duration penalty. Human ears may choose a different fade.
+Exact weights and limitations: scripts/audio4/README.txt. Each JSON records
+parameters, algorithm hash, source hash, tool versions, metrics and variants.
+
+PILOT AND VALIDATION
+Medical Explore first: A 150.758-233.496s, suggested 25ms. Medical Combat next:
+A 38.924-130.550s, hard. Combat tempo confidence 0.623 vs Explore 0.315;
+Combat A waveform correlation 0.859 vs Explore 0.456. These measurements make
+Combat the clearer numerical match; neither result was listened to by this agent.
+Pilot flaw checks led to explicit preview reset markers, constant-period fade
+semantics, precise review export on fade changes, and source/ignore safeguards.
+Five synthetic tests pass: filename mapping, overlap/head consumption, tonal
+mismatch ranking, periodic-loop recovery within bounds, audition markers/dimensions.
+Whole-pack verification passed: 22 unchanged source hashes, 66 in-range sample
+pairs, 396 constant-period variants, 132 nonempty/unclipped correctly sized WAVs,
+and git-ignore checks for every short audition. Output gains recorded in JSON.
+Independent Medical Explore refinement (149-153s start, 231-235s end, >=70s)
+recovered A; no whole-pack rerun needed. Full A render contains three loop passes.
+No runtime tests/build needed: runtime source and playback behavior were not edited.
+
+CANDIDATES (SECONDS; TIMES ROUNDED HERE, EXACT PCM INDICES IN JSON)
+loop_end is exclusive and INCLUDES fade overlap. Effective audible period is
+loop_end - loop_start - fade_duration. safe_resume is provisional loop body.
+Labels A/B/C are ranks only. Hard=0ms; comparisons contain all six fade choices.
+
+Track                    ID     Start       End    Period   Fade   Resume start-end       Rank
+medical_explore          A    150.758   233.496   82.713   25ms   150.758- 233.221   72.5
+medical_explore          B     99.053   233.444  134.391    0ms    99.053- 233.194   72.3
+medical_explore          C     83.760   207.316  123.556    0ms    83.760- 207.066   71.8
+medical_combat           A     38.924   130.550   91.627    0ms    38.924- 130.300   85.3
+medical_combat           B     65.105   130.564   65.459    0ms    65.105- 130.314   83.9
+medical_combat           C     66.861   119.231   52.370    0ms    66.861- 118.981   83.4
+research_explore         A    114.427   214.167   99.740    0ms   114.427- 213.917   75.0
+research_explore         B     63.046   212.633  149.587    0ms    63.046- 212.383   69.7
+research_explore         C     53.048   215.126  162.078    0ms    53.048- 214.876   69.7
+research_combat          A     70.594   160.011   89.417    0ms    70.594- 159.761   80.6
+research_combat          B     60.287   162.585  102.273   25ms    60.287- 162.310   80.5
+research_combat          C     60.905   117.026   56.121    0ms    60.905- 116.776   79.1
+reactor_explore          A     26.754   134.370  107.617    0ms    26.754- 134.120   83.5
+reactor_explore          B     64.079   196.500  132.421    0ms    64.079- 196.250   81.5
+reactor_explore          C     51.569   146.746   95.177    0ms    51.569- 146.496   80.6
+reactor_combat           A     78.708   162.523   83.815    0ms    78.708- 162.273   72.8
+reactor_combat           B     97.525   162.689   65.164    0ms    97.525- 162.439   72.4
+reactor_combat           C     79.719   150.346   70.577   50ms    79.719- 150.046   72.4
+maintenance_explore      A     85.804   156.299   70.495    0ms    85.804- 156.049   79.1
+maintenance_explore      B     92.768   156.307   63.539    0ms    92.768- 156.057   78.4
+maintenance_explore      C     72.416   156.993   84.577    0ms    72.416- 156.743   78.1
+maintenance_combat       A    100.537   185.268   84.706   25ms   100.537- 184.993   74.8
+maintenance_combat       B    114.006   177.533   63.527    0ms   114.006- 177.283   74.7
+maintenance_combat       C     93.453   149.038   55.585    0ms    93.453- 148.788   74.7
+storage_explore          A     56.740   128.733   71.993    0ms    56.740- 128.483   81.1
+storage_explore          B     43.027   128.736   85.709    0ms    43.027- 128.486   80.4
+storage_explore          C     29.406   128.843   99.437    0ms    29.406- 128.593   72.8
+storage_combat           A     23.723   119.702   95.979    0ms    23.723- 119.452   78.3
+storage_combat           B     21.785   131.511  109.726    0ms    21.785- 131.261   76.6
+storage_combat           C     33.609   115.895   82.286    0ms    33.609- 115.645   74.3
+flightdeck_explore       A     48.030    99.763   51.733    0ms    48.030-  99.513   77.8
+flightdeck_explore       B     55.018   105.941   50.923    0ms    55.018- 105.691   73.7
+flightdeck_explore       C     41.772    99.765   57.993    0ms    41.772-  99.515   66.1
+flightdeck_combat        A    104.486   175.855   71.369    0ms   104.486- 175.605   81.0
+flightdeck_combat        B     91.487   175.836   84.349    0ms    91.487- 175.586   80.4
+flightdeck_combat        C     91.485   169.332   77.847    0ms    91.485- 169.082   79.3
+executive_explore        A    101.978   215.221  113.243    0ms   101.978- 214.971   70.3
+executive_explore        B     55.375   215.400  160.000   25ms    55.375- 215.125   68.5
+executive_explore        C     79.985   214.433  134.423   25ms    79.985- 214.158   67.7
+executive_combat         A     83.814   163.814   80.000    0ms    83.814- 163.564   89.9
+executive_combat         B     46.822   131.820   84.998    0ms    46.822- 131.570   84.4
+executive_combat         C     93.863   173.863   80.000    0ms    93.863- 173.613   84.3
+groves_explore           A     42.515   108.867   66.352    0ms    42.515- 108.617   84.6
+groves_explore           B     38.206   100.324   62.118    0ms    38.206- 100.074   84.2
+groves_explore           C    110.901   201.254   90.353    0ms   110.901- 201.004   82.3
+groves_combat            A    101.591   177.792   76.201    0ms   101.591- 177.542   77.3
+groves_combat            B    114.215   187.607   73.392    0ms   114.215- 187.357   77.0
+groves_combat            C    118.532   177.794   59.262    0ms   118.532- 177.544   76.6
+engineering_explore      A     50.035   125.057   75.022    0ms    50.035- 124.807   78.4
+engineering_explore      B     92.941   192.721   99.780    0ms    92.941- 192.471   75.4
+engineering_explore      C    104.545   182.547   78.002    0ms   104.545- 182.297   73.8
+engineering_combat       A     66.909   180.911  114.002    0ms    66.909- 180.661   80.7
+engineering_combat       B     84.893   180.894   96.001    0ms    84.893- 180.644   79.2
+engineering_combat       C     75.896   183.910  107.989   25ms    75.896- 183.635   76.4
+security_explore         A     38.996   153.106  114.110    0ms    38.996- 152.856   85.5
+security_explore         B     31.745   120.093   88.348    0ms    31.745- 119.843   85.3
+security_explore         C     46.432   105.340   58.908    0ms    46.432- 105.090   84.7
+security_combat          A     51.396   110.473   59.077    0ms    51.396- 110.223   87.3
+security_combat          B     61.265   112.957   51.692    0ms    61.265- 112.707   85.4
+security_combat          C     67.799   119.488   51.689    0ms    67.799- 119.238   83.6
+bridge_explore           A    103.676   204.491  100.815    0ms   103.676- 204.241   81.5
+bridge_explore           B     64.486   128.456   63.970    0ms    64.486- 128.206   77.6
+bridge_explore           C    105.661   198.479   92.818    0ms   105.661- 198.229   76.6
+bridge_combat            A    109.454   173.454   64.000    0ms   109.454- 173.204   90.9
+bridge_combat            B     93.568   153.568   60.000    0ms    93.568- 153.318   86.2
+bridge_combat            C    102.113   166.138   64.000   25ms   102.113- 165.863   85.9
+
+MANUAL REVIEW PRIORITIES / LIMITATIONS
+All 22 require human selection; none is known to have a convincing musical loop
+until auditioned. No track failed to produce three numerical candidates. No
+track has been proven to require manual-only selection; do not confuse that with
+proof of automatic success. Weak tempo evidence affects ALL candidates for:
+  flightdeck_explore (confidence 0.242)
+  executive_explore (confidence 0.202)
+  groves_explore (confidence 0.220)
+Executive Explore and Reactor Combat also have low A waveform correlation
+(0.271 / 0.317). Storage Combat A and Security Combat A have weaker beat-span
+alignment despite high timbral similarity: scrutinize meter, especially hard joins.
+A/B/C can share an ending; they vary at least one boundary region. Listen for
+harmonic jumps, doubled/missing attacks, quiet dips and conspicuous repetition.
+Use full-loop renders before accepting long-range form. No plots were needed to
+validate the render mechanics; listening remains the main acceptance criterion.
+
+OUTPUT AND HUMAN WORKFLOW
+C:\Dev\system-shock-android\dist\audio4\listen.html
+Open this local HTML in a browser. Each candidate has primary and comparison audio.
+Choose best/acceptable/bad/manual refinement and fade; download review JSON.
+Choices are only in browser memory until downloaded. Nothing is uploaded.
+Primary joins: 6s and 19s. Silence at 12-13s is a preview reset, not a loop join.
+Comparison order: hard,25,50,100,150,250ms; joins at 4,13,22,31,40,49s.
+All WAVs use original 44.1-kHz rate, stereo, lossless 16-bit PCM.
+Generated media and caches are git-ignored; do not publish them.
+
+WAV directory: C:\Dev\system-shock-android\dist\audio4
+Full example: C:\Dev\system-shock-android\dist\audio4\medical_explore_candidate_A_full.wav
+Machine-readable data: C:\Dev\system-shock-android\dist\audio4\candidates.json
+Inventory: C:\Dev\system-shock-android\dist\audio4\inventory.json
+Blank review template: C:\Dev\system-shock-android\dist\audio4\review-template.csv
+Proposed metadata: C:\Dev\system-shock-android\dist\audio4\loops.proposed.ini
+Portable small result table: C:\Dev\system-shock-android\docs\AUDIO4_CANDIDATES.csv
+Tool and rerun commands: C:\Dev\system-shock-android\scripts\audio4\README.txt
+
+METADATA PROPOSAL / TIMING CONTRACT
+INI-style sections fit current prefs.txt key=value conventions and are easy for
+C/C++ to parse. [pack] contains schema_version, id, timebase=decoded_pcm,
+crossfade_mode=linear_overlap, enabled=false and unreviewed status.
+[deck_variant] contains source SHA-256, rate, loop_start/end seconds and samples,
+crossfade_ms, safe_resume_start/end and per-track status. Candidate A is a draft
+example only, not a selection. Pack id supports future SS2/custom registries.
+Integer sample indices should be canonical; reject inconsistent times, wrong
+source/rate, invalid bounds, unsupported semantics and unapproved status.
+
+Given musical start S and hard splice E, a fade of F uses loop_end=E+F.
+Overlap tail [E,E+F) with head [S,S+F), then resume at S+F. This keeps the
+period E-S for every fade option. Do not restart at S after the overlap.
+Resume region [S,E-0.25s] is conservative/provisional, not guaranteed safe for
+every mid-note seek. It is a region suggestion, not random-start behavior.
+
+MP3 / ANDROID CAVEATS AND NEXT STEP
+PCM analysis accounts for what this FFmpeg decoder emits. Encoder delay, padding,
+MP3 frames, decoder buffering and seek latency can differ under Android
+SDL_mixer 2.8.1/minimp3. Immediate seek-position reports do not prove audible
+sample alignment. All endpoints require later on-device verification.
+Next: listen/select candidates and fades; narrow individual searches as needed;
+freeze approved metadata; perform a separate runtime integration milestone and
+hardware audition. No backend replacement, Explore/Combat crossfade, gameplay
+change, random resume, source alteration, commit or push was performed.

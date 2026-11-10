@@ -4,6 +4,7 @@
 #include "MusicDevice.h"
 #include "Prefs.h"
 #include "ExternalMusic.h"
+#include "AudioVolumeCurve.h"
 
 unsigned int NumTracks;
 char ChannelThread[16]; // 16 device channels
@@ -554,7 +555,7 @@ int MyThread(void *arg) {
                         if (MusicDev && MusicDev->isOpen) {
                             // scale new volume according to global music volume
                             extern uchar curr_vol_lev; // 0-100
-                            const int scaledVolume = ((int)p2 * (int)curr_vol_lev) / 100;
+                            const int scaledVolume = AudioVolumeScale(curr_vol_lev, p2);
                             MusicDev->sendControllerChange(MusicDev, channel, p1, scaledVolume);
                         }
                         SDL_UnlockMutex(MyMutex);
@@ -1008,7 +1009,7 @@ void UpdateVolumeXMI(void) {
             if (i != 9 && ChannelThread[i] == -1)
                 continue;
             // scale new volume according to global music volume
-            const int scaledVolume = ((int)SDL_AtomicGet(&DeviceChannelVolume[i]) * (int)curr_vol_lev) / 100;
+            const int scaledVolume = AudioVolumeScale(curr_vol_lev, SDL_AtomicGet(&DeviceChannelVolume[i]));
             MusicDev->sendControllerChange(MusicDev, i, 7, scaledVolume);
         }
     }

@@ -43,6 +43,11 @@ typedef struct {
     bool soBackMusic;
     bool soSoundFX;
     int soSoundtrack; // ExternalMusic mode; default Original, never part of saves
+    bool soDynamicMusic; // Remake Explore/Combat transitions
+    bool soEnhancedAmbience; // optional asset-driven soundscape
+    short soMasterVolume;
+    short soAmbientVolume;
+    bool soExplorationMusicBreaks; // optional external Explore silence; prefs only
     short soMusicVolume;
     short soSfxVolume;
     short soAudioLogVolume;

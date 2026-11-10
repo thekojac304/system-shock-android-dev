@@ -105,13 +105,18 @@ int main(int argc,char **argv) {
         assert(t.panel==TOUCH_UI_QA && !t.sprint_latched && !t.radial.open);
         int before=game_edges;
         for (int a=TU_QA_GOD;a<=TU_QA_DECK_LAST;++a) {
-            if (a==TU_QA_CLOSE) continue;
+            if (a==TU_QA_CLOSE || a==TU_QA_ASSIST) continue;
             TouchRect r=touch_ui_bounds(&t,(TouchUiAction)a);
             assert(r.x>0 && r.y>0 && r.x+r.w<t.layout.width && r.y+r.h<t.layout.height);
             int count=commands;
             tap(&t,r,3);
             assert(commands==count+1 && command==a);
         }
+        int before_assist=commands;
+        tap(&t,touch_ui_bounds(&t,TU_QA_ASSIST),3);
+        assert(t.qa_assist_debug && commands==before_assist);
+        tap(&t,touch_ui_bounds(&t,TU_QA_ASSIST),3);
+        assert(!t.qa_assist_debug && commands==before_assist);
         /* Multi-finger taps over gameplay controls cannot acquire ownership. */
         touch_finger(&t,TOUCH_DOWN,1,7,1,1,4);
         tap(&t,touch_control_bounds(&t,TC_FIRE),8);

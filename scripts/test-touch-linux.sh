@@ -14,15 +14,20 @@ for suite in touch_controls touch_alpha11 touch_alpha2 touch_alpha3 touch_alpha4
         "$out/${suite}_test"
     fi
 done
+gcc "${common[@]}" "${core[@]}" "$touch/tests/touch_audio_menu_test.c" -lm -o "$out/touch_audio_menu_test"
+"$out/touch_audio_menu_test"
 gcc "${common[@]}" -DDECLSPEC= -DSDL_MAIN_HANDLED \
     "-I$root/.deps/SDL2/include" "$touch/tests/touch_surface_test.c" -o "$out/touch_surface_test"
 "$out/touch_surface_test"
-gcc "${common[@]}" "-I$touch/tests/stubs" "${core[@]}" \
+gcc "${common[@]}" -DTOUCH_TEST_ASSIST "-I$touch/tests/stubs" "${core[@]}" \
     "$touch/tests/touch_bridge_test.c" -lm -o "$out/touch_bridge_test"
 "$out/touch_bridge_test"
 gcc -std=c11 -Wall -Wextra -Werror -pedantic -O2 "-I$touch/tests/stubs" "-I$touch" \
     "$touch/tests/touch_target_test.c" -o "$out/touch_target_test"
 "$out/touch_target_test"
+gcc -std=c11 -Wall -Wextra -Werror -pedantic -O2 "-I$touch" \
+    "$touch/tests/touch_assist_test.c" -o "$out/touch_assist_test"
+"$out/touch_assist_test"
 includes=("-I$root" "-I$root/.deps/SDL2/include" "-I$touch"
     "-I$root/SourceSnapshot/src/GameSrc/Headers" "-I$root/SourceSnapshot/src/MacSrc"
     "-I$root/SourceSnapshot/src/Libraries/H"
@@ -42,7 +47,7 @@ gcc -std=gnu11 -O2 -D__ANDROID__ -DDECLSPEC= -DSDL_MAIN_HANDLED -DTOUCH_HEADLESS
     "${includes[@]}" -include precompiled.h "$touch/tests/touch_menu_test.c" \
     "${objects[@]}" -lm -o "$out/touch_menu_test"
 "$out/touch_menu_test"
-gcc -std=c11 -Wall -Wextra -Werror -pedantic -O2 -DDECLSPEC= -DSDL_MAIN_HANDLED \
+gcc -std=c11 -Wall -Wextra -Werror -pedantic -O2 -DDECLSPEC= -DSDL_MAIN_HANDLED -DRP5NP_QA_TOOLS \
     "-I$root/.deps/SDL2/include" "-I$touch" "${core[@]}" "$touch/touch_render.c" \
     "$touch/tests/touch_render_test.c" -lm -o "$out/touch_render_test"
 "$out/touch_render_test"

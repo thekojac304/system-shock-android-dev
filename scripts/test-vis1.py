@@ -21,8 +21,9 @@ checks=(root/'tests/visuals/adapter_checks.c').read_text()
 prefs=(root/'SourceSnapshot/src/MacSrc/Prefs.c').read_text()
 constants='\n'.join(line for line in prefs.splitlines() if line.startswith('static const char *PREF_'))
 functions=prefs[prefs.index('static char *trim('):prefs.index('//  Set the corresponding Shock globals')]
+parsers=prefs[prefs.index('static int parse_percent('):prefs.index('void SetDefaultPrefs(')]
 (out/'preferences_test.c').write_text((root/'tests/visuals/preferences_fixture.h').read_text()+
-    '\n'+constants+'\n'+functions+(root/'tests/visuals/preferences_checks.c').read_text())
+    '\n'+constants+'\n'+parsers+functions+(root/'tests/visuals/preferences_checks.c').read_text())
 remote='/data/local/tmp/shock-vis1-tests'
 subprocess.run([str(adb),'shell','mkdir','-p',remote],check=True)
 for name,src,args in [

@@ -61,6 +61,10 @@ endforeach()
 # QA commands are linked only into the separate QA application. Runtime opt-in
 # remains OFF even in that application.
 option(RP5NP_QA_TOOLS "Build touch-accessible QA commands" OFF)
+option(AUDIO4_QA_FAST_BREAKS "Accelerate optional exploration breaks in QA only" OFF)
+if(AUDIO4_QA_FAST_BREAKS)
+    target_compile_definitions(main PRIVATE AUDIO4_QA_FAST_BREAKS=1)
+endif()
 if(RP5NP_QA_TOOLS)
     target_sources(GAME_LIB PRIVATE touch/qa_tools.c)
     foreach(qa_consumer main GAME_LIB)

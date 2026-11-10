@@ -88,6 +88,9 @@ void touch_ui_action(TouchControls *t, TouchUiAction action) {
             if (action==TU_QA_CLOSE) {
                 touch_cancel(t);
                 ui_emit(t,TOUCH_UI_CHANGED);
+            } else if (action==TU_QA_ASSIST) {
+                t->qa_assist_debug=!t->qa_assist_debug;
+                t->assist_visual=(TouchAssistVisual){0};
             } else if (action==TU_QA_GOD || action==TU_QA_HEAL || action==TU_QA_LOADOUT ||
                        (action>=TU_QA_DECK_FIRST && action<=TU_QA_DECK_LAST)) {
                 if (t->emit) t->emit(t->user,TOUCH_QA_COMMAND,(float)action,0);
@@ -99,6 +102,14 @@ void touch_ui_action(TouchControls *t, TouchUiAction action) {
     switch (action) {
     case TU_EDIT: t->panel=TOUCH_UI_EDITOR; break;
     case TU_BACK: t->panel=TOUCH_UI_SETTINGS; break;
+    case TU_AUDIO:
+        t->panel=TOUCH_UI_AUDIO;
+        ui_emit(t,TOUCH_AUDIO_OPEN);
+        break;
+    case TU_AUDIO_BACK: t->panel=TOUCH_UI_SETTINGS; break;
+    case TU_AUDIO_SOUNDTRACK: t->audio.remake=!t->audio.remake; ui_emit(t,TOUCH_AUDIO_CHANGED); ui_emit(t,TOUCH_AUDIO_SAVE); break;
+    case TU_AUDIO_DYNAMIC: t->audio.dynamic=!t->audio.dynamic; ui_emit(t,TOUCH_AUDIO_CHANGED); ui_emit(t,TOUCH_AUDIO_SAVE); break;
+    case TU_AUDIO_ENABLE: t->audio.enhanced=!t->audio.enhanced; ui_emit(t,TOUCH_AUDIO_CHANGED); ui_emit(t,TOUCH_AUDIO_SAVE); break;
     case TU_OPACITY_DOWN: t->settings.opacity-=.05f; break;
     case TU_OPACITY_UP: t->settings.opacity+=.05f; break;
     case TU_X_DOWN: t->settings.sensitivity_x-=.1f; break;
@@ -164,7 +175,8 @@ TouchRect touch_ui_bounds(const TouchControls *t, TouchUiAction action) {
         case TU_Y_DOWN: case TU_Y_UP: y=.47f; break;
         case TU_INVERT: r=(TouchRect){.22f,.57f,.56f,.075f}; break;
         case TU_STICK_DOWN: case TU_STICK_UP: y=.67f; break;
-        case TU_RESET: r=(TouchRect){.22f,.77f,.56f,.065f}; break;
+        case TU_AUDIO: r=(TouchRect){.22f,.755f,.56f,.045f}; break;
+        case TU_RESET: r=(TouchRect){.22f,.81f,.56f,.045f}; break;
         case TU_CANCEL: r=(TouchRect){.22f,.87f,.26f,.075f}; break;
         case TU_SAVE: r=(TouchRect){.52f,.87f,.26f,.075f}; break;
         default: break;
@@ -173,11 +185,24 @@ TouchRect touch_ui_bounds(const TouchControls *t, TouchUiAction action) {
             bool plus=action==TU_OPACITY_UP || action==TU_X_UP || action==TU_Y_UP || action==TU_STICK_UP;
             r=(TouchRect){plus ? .68f : .22f,y,.10f,.075f};
         }
+    } else if (t->panel==TOUCH_UI_AUDIO) {
+        switch (action) {
+        case TU_AUDIO_MASTER: r=(TouchRect){.22f,.16f,.56f,.075f}; break;
+        case TU_AUDIO_MUSIC: r=(TouchRect){.22f,.26f,.56f,.075f}; break;
+        case TU_AUDIO_SFX: r=(TouchRect){.22f,.36f,.56f,.075f}; break;
+        case TU_AUDIO_AMBIENT: r=(TouchRect){.22f,.46f,.56f,.075f}; break;
+        case TU_AUDIO_SOUNDTRACK: r=(TouchRect){.22f,.58f,.56f,.075f}; break;
+        case TU_AUDIO_DYNAMIC: r=(TouchRect){.22f,.68f,.56f,.075f}; break;
+        case TU_AUDIO_ENABLE: r=(TouchRect){.22f,.78f,.56f,.075f}; break;
+        case TU_AUDIO_BACK: r=(TouchRect){.32f,.885f,.36f,.075f}; break;
+        default: break;
+        }
     } else if (t->panel==TOUCH_UI_QA && t->qa_enabled) {
         if (action==TU_QA_GOD) r=(TouchRect){.12f,.16f,.24f,.09f};
         else if (action==TU_QA_HEAL) r=(TouchRect){.38f,.16f,.24f,.09f};
         else if (action==TU_QA_LOADOUT) r=(TouchRect){.64f,.16f,.24f,.09f};
-        else if (action==TU_QA_CLOSE) r=(TouchRect){.32f,.87f,.36f,.09f};
+        else if (action==TU_QA_ASSIST) r=(TouchRect){.20f,.825f,.60f,.055f};
+        else if (action==TU_QA_CLOSE) r=(TouchRect){.32f,.90f,.36f,.07f};
         else if (action>=TU_QA_DECK_FIRST && action<=TU_QA_DECK_LAST) {
             int i=action-TU_QA_DECK_FIRST;
             r=(TouchRect){.12f+(i%3)*.26f,.30f+(i/3)*.105f,.24f,.09f};
@@ -206,12 +231,22 @@ TouchRect touch_ui_bounds(const TouchControls *t, TouchUiAction action) {
 }
 void touch_ui_finger(TouchControls *t, TouchPhase phase, int64_t device, int64_t finger,
                      float x, float y) {
+    /* Slider owns its whole row: tapping or dragging anywhere on the track
+       changes the bus immediately; release persists once. */
+    #define AUDIO_SLIDER(a) ((a)>=TU_AUDIO_MASTER && (a)<=TU_AUDIO_AMBIENT)
     if (phase==TOUCH_DOWN) {
         if (t->ui_owned) return;
         t->ui_owned=true; t->ui_device=device; t->ui_finger=finger;
         t->ui_start_x=x; t->ui_start_y=y; t->ui_action=-1; t->ui_drag=false;
         for (int a=0; a<TU_COUNT; ++a) if (inside(touch_ui_bounds(t,(TouchUiAction)a),x,y)) {
-            t->ui_action=a; return;
+            t->ui_action=a;
+            if (t->panel==TOUCH_UI_AUDIO && AUDIO_SLIDER(a)) {
+                int value=(int)lroundf(clamp((x/t->layout.width-.26f)/.48f,0,1)*100);
+                int *bus=a==TU_AUDIO_MASTER?&t->audio.master:a==TU_AUDIO_MUSIC?&t->audio.music:
+                         a==TU_AUDIO_SFX?&t->audio.sfx:&t->audio.ambient;
+                if (*bus!=value) { *bus=value; ui_emit(t,TOUCH_AUDIO_CHANGED); }
+            }
+            return;
         }
         if (t->panel==TOUCH_UI_EDITOR) {
             float closest=1e30f;
@@ -227,6 +262,17 @@ void touch_ui_finger(TouchControls *t, TouchPhase phase, int64_t device, int64_t
         return;
     }
     if (!t->ui_owned || device!=t->ui_device || finger!=t->ui_finger) return;
+    if (t->panel==TOUCH_UI_AUDIO && AUDIO_SLIDER(t->ui_action)) {
+        int value=(int)lroundf(clamp((x/t->layout.width-.26f)/.48f,0,1)*100);
+        int *bus=t->ui_action==TU_AUDIO_MASTER?&t->audio.master:t->ui_action==TU_AUDIO_MUSIC?&t->audio.music:
+                 t->ui_action==TU_AUDIO_SFX?&t->audio.sfx:&t->audio.ambient;
+        if (*bus!=value) { *bus=value; ui_emit(t,TOUCH_AUDIO_CHANGED); }
+        if (phase==TOUCH_UP || phase==TOUCH_ABORT) {
+            if (phase==TOUCH_UP) ui_emit(t,TOUCH_AUDIO_SAVE);
+            t->ui_owned=false; t->ui_action=-1;
+        }
+        return;
+    }
     if (t->ui_drag) touch_editor_position(t,t->selected,x-t->ui_offset_x,y-t->ui_offset_y);
     float dx=x-t->ui_start_x,dy=y-t->ui_start_y;
     if (dx*dx+dy*dy>t->cursor_slop*t->cursor_slop) t->ui_action=-1;

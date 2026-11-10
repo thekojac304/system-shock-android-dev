@@ -7,10 +7,22 @@
 #include "mouselook.h"
 #include "input.h"
 #include "touch_visual_compare.h"
+#include "touch_assist.h"
 #include <stddef.h>
 #include <stdio.h>
-#ifdef RP5NP_QA_TOOLS
+#ifndef TOUCH_HEADLESS
+#include "AmbientDirector.h"
 #include "Prefs.h"
+extern void touch_game_audio_snapshot(int out[7]);
+extern void touch_game_audio_apply(const int in[7]);
+#endif
+#if !defined(TOUCH_HEADLESS) || defined(TOUCH_TEST_ASSIST)
+extern bool touch_ui_assist_game_point(int *x,int *y,TouchAssistDebug *debug);
+#endif
+#ifdef TOUCH_HEADLESS
+static void AmbientDirectorSuspend(void) {}
+#endif
+#ifdef RP5NP_QA_TOOLS
 #include "horror_visuals.h"
 #include "qa_tools.h"
 static int qa_pending=-1;
@@ -157,9 +169,39 @@ static void pointer(float x, float y) {
     touch_input_pointer(gx, gy);
 }
 
+#ifdef RP5NP_QA_TOOLS
+static TouchRect assist_screen_rect(TouchAssistRect b) {
+    return (TouchRect){game_viewport.x+b.x0*game_scale_x,
+                       game_viewport.y+b.y0*game_scale_y,
+                       (b.x1-b.x0)*game_scale_x,(b.y1-b.y0)*game_scale_y};
+}
+#endif
+
 static void output(void *user, TouchOutput event, float x, float y) {
     (void)user;
     switch (event) {
+    case TOUCH_AUDIO_OPEN:
+#ifndef TOUCH_HEADLESS
+        {
+            int a[7]; touch_game_audio_snapshot(a);
+            touch.audio=(TouchAudioSettings){a[0],a[1],a[2],a[3],a[4],a[5],a[6]};
+        }
+#endif
+        break;
+    case TOUCH_AUDIO_CHANGED:
+#ifndef TOUCH_HEADLESS
+        {
+            int a[7]={touch.audio.master,touch.audio.music,touch.audio.sfx,touch.audio.ambient,
+                      touch.audio.remake,touch.audio.dynamic,touch.audio.enhanced};
+            touch_game_audio_apply(a);
+        }
+#endif
+        break;
+    case TOUCH_AUDIO_SAVE:
+#ifndef TOUCH_HEADLESS
+        if (SavePrefs()!=0) touch.save_failed=true;
+#endif
+        break;
     case TOUCH_QA_COMMAND:
 #ifdef RP5NP_QA_TOOLS
         if (touch.qa_enabled && touch.panel==TOUCH_UI_QA && qa_pending<0)
@@ -246,12 +288,47 @@ static void output(void *user, TouchOutput event, float x, float y) {
         break;
     case TOUCH_POINTER_TAP: {
         float gx, gy;
+        bool assisted=false;
+        /* The cursor mapper clamps bars to the nearest game edge. A bar tap
+           must never become a legacy UI tap after that clamp. */
+        if (x<game_viewport.x || y<game_viewport.y ||
+            x>=game_viewport.x+game_viewport.w || y>=game_viewport.y+game_viewport.h)
+            break;
         request_mode(false);
         touch_map_cursor(x, y, game_viewport, game_scale_x, game_scale_y,
                          game_width, game_height, &gx, &gy);
+#if !defined(TOUCH_HEADLESS) || defined(TOUCH_TEST_ASSIST)
+        {
+            int ix=(int)gx,iy=(int)gy;
+            TouchAssistDebug detail={0};
+            if (touch_ui_assist_game_point(&ix,&iy,&detail)) {
+                gx=(float)ix;gy=(float)iy;assisted=true;
+            }
+#ifdef RP5NP_QA_TOOLS
+            if (touch.qa_assist_debug && touch.qa_enabled) {
+                TouchAssistVisual *v=&touch.assist_visual;
+                v->valid=true;v->selected=detail.valid;
+                v->stage=TOUCH_ASSIST_TAP;
+                v->kind=detail.kind;v->index=detail.index;
+                v->raw_x=x;v->raw_y=y;
+                if (detail.valid) {
+                    v->cluster=assist_screen_rect(detail.cluster);
+                    v->effective=assist_screen_rect(detail.effective);
+                    v->original=assist_screen_rect(detail.original);
+                    v->selected_x=game_viewport.x+detail.selected_x*game_scale_x;
+                    v->selected_y=game_viewport.y+detail.selected_y*game_scale_y;
+                }
+            }
+#endif
+        }
+#endif
         touch_input_pointer(gx, gy);
         /* Capture the target before the first press changes a panel or loop. */
-        TouchCursorTarget target = touch_cursor_target_at((int)gx, (int)gy);
+        /* The fullscreen view's z-order classifier can call the bottom tab
+           strip WORLD even when the touch-only assistant resolved a known UI
+           control. In that case send one direct UI tap, never world double use. */
+        TouchCursorTarget target = assisted ? TOUCH_TARGET_UI_CONTROL :
+            touch_cursor_target_at((int)gx, (int)gy);
         if (target==TOUCH_TARGET_UI_CONTROL || target==TOUCH_TARGET_NONE) {
             touch_input_tap(gx,gy);
             break;
@@ -292,6 +369,12 @@ void touch_bridge_init(void) {
 }
 
 void touch_bridge_cancel(void) {
+#ifdef RP5NP_QA_TOOLS
+    if (touch.assist_visual.valid &&
+        (touch.assist_visual.stage==TOUCH_ASSIST_DOWN ||
+         touch.assist_visual.stage==TOUCH_ASSIST_DRAG))
+        touch.assist_visual.stage=TOUCH_ASSIST_CANCEL;
+#endif
     if (initialized) touch_cancel(&touch);
     touch_movie_tap_reset(&movie_tap);
     touch_use_pending = pending_auto_return = false;
@@ -344,6 +427,8 @@ void touch_bridge_after_input(void) {
 }
 
 void touch_bridge_sync(void) {
+    if (background || unfocused || game_paused || wrapper_panel_on || olh_overlay_on)
+        AmbientDirectorSuspend();
     if (!initialized || syncing || !renderer || !window) return;
     syncing = true;
     load_settings();
@@ -467,6 +552,35 @@ void touch_bridge_event(const SDL_Event *event) {
         TouchMode before_mode = touch.mode;
         touch_finger(&touch, surface.phase, surface.device, surface.finger,
                      surface.x, surface.y, SDL_GetTicks());
+#ifdef RP5NP_QA_TOOLS
+        if (touch.qa_enabled && touch.qa_assist_debug &&
+            touch.panel==TOUCH_UI_CLOSED && touch.effective_mode==TOUCH_CURSOR) {
+            TouchAssistVisual *v=&touch.assist_visual;
+            if (surface.phase==TOUCH_DOWN && touch.cursor_owner>=0) {
+                TouchFinger *f=&touch.fingers[touch.cursor_owner];
+                if (f->touch==surface.device && f->finger==surface.finger &&
+                    surface.x>=game_viewport.x && surface.y>=game_viewport.y &&
+                    surface.x<game_viewport.x+game_viewport.w &&
+                    surface.y<game_viewport.y+game_viewport.h) {
+                    *v=(TouchAssistVisual){.valid=true,.stage=TOUCH_ASSIST_DOWN,
+                        .raw_x=surface.x,.raw_y=surface.y,
+                        .device=surface.device,.finger=surface.finger};
+                }
+            } else if (v->valid && v->device==surface.device &&
+                       v->finger==surface.finger) {
+                if (surface.phase==TOUCH_MOTION &&
+                    (v->stage==TOUCH_ASSIST_DOWN || v->stage==TOUCH_ASSIST_DRAG)) {
+                    v->raw_x=surface.x;v->raw_y=surface.y;
+                    for (int i=0;i<TOUCH_MAX_FINGERS;++i)
+                        if (touch.fingers[i].active &&
+                            touch.fingers[i].touch==surface.device &&
+                            touch.fingers[i].finger==surface.finger &&
+                            touch.fingers[i].dragging) v->stage=TOUCH_ASSIST_DRAG;
+                } else if (surface.phase==TOUCH_UP && v->stage==TOUCH_ASSIST_DOWN)
+                    v->stage=TOUCH_ASSIST_NO_TAP;
+            }
+        }
+#endif
         if (touch.mode != before_mode)
             touch_use_pending = pending_auto_return = false;
         if (touch.move_owner < 0) clear_movement();
@@ -476,7 +590,7 @@ void touch_bridge_event(const SDL_Event *event) {
     case SDL_APP_WILLENTERBACKGROUND:
     case SDL_APP_DIDENTERBACKGROUND:
     case SDL_APP_TERMINATING:
-        background = true; touch_bridge_cancel(); break;
+        background = true; AmbientDirectorSuspend(); touch_bridge_cancel(); break;
     case SDL_APP_WILLENTERFOREGROUND:
     case SDL_APP_DIDENTERFOREGROUND:
         background = event->type != SDL_APP_DIDENTERFOREGROUND;
@@ -487,7 +601,7 @@ void touch_bridge_event(const SDL_Event *event) {
     case SDL_WINDOWEVENT:
         switch (event->window.event) {
         case SDL_WINDOWEVENT_FOCUS_LOST:
-            unfocused = true; touch_bridge_cancel(); break;
+            unfocused = true; AmbientDirectorSuspend(); touch_bridge_cancel(); break;
         case SDL_WINDOWEVENT_FOCUS_GAINED:
             unfocused = false; touch_bridge_cancel(); break;
         case SDL_WINDOWEVENT_SIZE_CHANGED:

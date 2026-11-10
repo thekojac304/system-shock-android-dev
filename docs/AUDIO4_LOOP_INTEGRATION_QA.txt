@@ -1,0 +1,168 @@
+AUDIO4 LOOP INTEGRATION AND QA — 2026-10-04
+
+Selection and provenance
+The user-supplied human review JSON was read at the start of this task. Its
+Downloads copy disappeared later in the session, so AUDIO4_REVIEW_SELECTED.json
+preserves the 22 selected rows transcribed from that read. Re-run
+scripts/audio4/select_review.py with the original full review JSON whenever it
+is available; the script rejects ambiguous choices, invalid ranges, inconsistent
+source identities and hash mismatches. It prefers one best, otherwise one
+acceptable. Bad and unreviewed are never selected. 18 best, 4 acceptable;
+no unresolved tracks in the captured review. The four acceptable selections
+are storage_explore A, flightdeck_explore B, executive_explore A and
+security_explore A. Review notes are reproduced below.
+
+All 22 actual source MP3 SHA-256 hashes were checked against the analysis CSV
+and selected review rows on 2026-10-04: MATCH. No MP3 was modified or bundled.
+The generated compact manifest is AUDIO4_SELECTED_LOOPS.tsv (tab-delimited,
+versioned comment plus header). The C runtime table Audio4Loops.h is generated
+from the same validated selection. A runtime track opens only when its exact
+file SHA-256 matches that row. Mismatch or absent metadata uses legacy whole-file
+playback and logs a warning. Hashing occurs once when the track opens, not per
+frame. User-owned files remain outside the APK. The table is keyed by pack
+track ID and can later be extended for Windows, SS2 and custom packs.
+
+Times are decoded PCM frames at sample_rate. Intervals are half-open. The
+listed loop_end_sample for faded auditions is extended by the overlap length;
+loop duration is (hard_loop_end_sample-loop_start_sample)/sample_rate. For a
+faded audition, AUDIO4 analysis blended [hard_end, loop_end) against the
+corresponding head [start, start+fade) and continued at start+fade. SDL_mixer
+currently has one music stream and cannot produce that true two-source blend.
+Runtime seeks at hard_loop_end to loop_start for all selections, preserving the
+musical period and avoiding the outro. Four faded selections are approximate
+hard joins; sequential fade out/in is not claimed as equivalent. Audible splice
+quality, clicks and stalls require hardware listening. Mix_GetMusicPosition is
+a decoded cursor and may lead audible output by a buffer; boundary accuracy is
+best effort, not sample exact. True overlap requires a future multi-stream backend.
+
+Selected tracks
+track | candidate | review | source SHA-256 | Hz | loop_start_sample | hard_loop_end_sample | loop_end_sample | crossfade_ms | start s | end s | loop duration s | review note
+--- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---
+bridge_combat | A | best | f311ca5cd700964e067923ce1cae9f5cf0a78706a40400194c5771d6d4b63ffd | 44100 | 4826921 | 7649321 | 7649321 | 0 | 109.454 | 173.454 | 64.000 | —
+bridge_explore | B | best | 79e6990fc118bfc9b0b454be7f9d9611345252bb202ec75b4b80b58f6df7f789 | 44100 | 2843833 | 5664910 | 5664910 | 0 | 64.486 | 128.456 | 63.970 | best but short...
+engineering_combat | A | best | 1120def62d5afbbb17ea635903d86f537303dffe7949c116a75e91bbf410f584 | 44100 | 2950687 | 7978175 | 7978175 | 0 | 66.909 | 180.911 | 114.002 | —
+engineering_explore | A | best | 6e9609740d5a21bfb19a20d498763bf5d211059932e58ce5a86e75210e26fcf1 | 44100 | 2206544 | 5515014 | 5515014 | 0 | 50.035 | 125.057 | 75.022 | —
+executive_combat | A | best | 5f158dfec2be0d98b7a7cadbb3feb172a5daca9a2d2e9887971a1f4218da3f64 | 44100 | 3696197 | 7224197 | 7224197 | 0 | 83.814 | 163.814 | 80.000 | —
+executive_explore | A | acceptable | 0c98433a3ed6a2de72f7a6d1718f5364551002054be8fa03beff96df80cdbfad | 44100 | 4497230 | 9491246 | 9491246 | 0 | 101.978 | 215.221 | 113.243 | —
+flightdeck_combat | A | best | 8f8114644dcc65bd5389af8487a409bd76e1f6dd60fb7e5f62a46a7ffdde1b98 | 44100 | 4607833 | 7755206 | 7755206 | 0 | 104.486 | 175.855 | 71.369 | —
+flightdeck_explore | B | acceptable | c24b48ae8dea219feaecd2de96256c615c901b978ae6f8e4f990063c4543fd41 | 44100 | 2426294 | 4671998 | 4671998 | 0 | 55.018 | 105.941 | 50.923 | —
+groves_combat | A | best | a050399e37771a270fcb52b4b0d13140ef0711aaeb24e62a2415e821e5a98b44 | 44100 | 4480163 | 7840627 | 7840627 | 0 | 101.591 | 177.792 | 76.201 | —
+groves_explore | C | best | 8ec61ce65c76c0bb0bdfcd52edce0fea5e6f1e3fbcf8e087e333843323e3c321 | 44100 | 4890734 | 8875301 | 8875301 | 0 | 110.901 | 201.254 | 90.353 | —
+maintenance_combat | C | best | c5197a2bf2c0635f1cb62011faaee0fe36c033aafea6867e831f11e370be6d5e | 44100 | 4121277 | 6572576 | 6572576 | 0 | 93.453 | 149.038 | 55.585 | best but shortest
+maintenance_explore | A | best | 5bcc3e807bb3e080bf6fe4139053a230cbeee8487e5e232e0b518bdf867fa622 | 44100 | 3783956 | 6892764 | 6892764 | 0 | 85.804 | 156.299 | 70.495 | —
+medical_combat | A | best | a851750074d21fbbb291fc264efb2d364e5f0a1d0bbc1e54842aca788e5ce9fd | 44100 | 1716548 | 5757277 | 5757277 | 0 | 38.924 | 130.550 | 91.627 | —
+medical_explore | C | best | 04046c1ac544d7627a3161a57053cdf702aff610a61eddd38f409af03a55a065 | 44100 | 3693816 | 9142636 | 9153661 | 250 | 83.760 | 207.566 | 123.556 | —
+reactor_combat | A | best | 49520012ca43173c1472e4a7a4aafe729063fdc184005b4922054afc6c898f4b | 44100 | 3471023 | 7167264 | 7167264 | 0 | 78.708 | 162.523 | 83.815 | —
+reactor_explore | C | best | abdcf8832808683bc6295cc0cd5d86ff2f2f55bd4a744b19d978a13f90bc0a2c | 44100 | 2274193 | 6471499 | 6471499 | 0 | 51.569 | 146.746 | 95.177 | best but shortest
+research_combat | B | best | 15c4491cde425445289f7c6639496a56c7a172a53397a7dfcdd62758c44c1171 | 44100 | 2658657 | 7168896 | 7169999 | 25 | 60.287 | 162.585 | 102.273 | —
+research_explore | A | best | a35b086ce18fa2edcc3debe175ac3a8e3c3a7682aa487198a78c15c7031e3123 | 44100 | 5046231 | 9444765 | 9444765 | 0 | 114.427 | 214.167 | 99.740 | best but shortest so idk
+security_combat | A | best | 66978accf4c5ba41f7aa4c9431f16d3c74f963956de3292751649da97f9d28c5 | 44100 | 2266564 | 4871859 | 4871859 | 0 | 51.396 | 110.473 | 59.077 | —
+security_explore | A | acceptable | 4d4f7388fa27274d65c49b60936d113fdb8fde85fa3540eea010e18ee5da3097 | 44100 | 1719724 | 6751975 | 6763000 | 250 | 38.996 | 153.356 | 114.110 | —
+storage_combat | C | best | 3249b1692a403f23b4b308b1fdf40a4b0bfed89437485f117142abb95a611b4c | 44100 | 1482157 | 5110970 | 5110970 | 0 | 33.609 | 115.895 | 82.286 | —
+storage_explore | A | acceptable | 07c06d48051717bcb5de8fe274bbf9b44404a53ca5580613bec6857078c13cbb | 44100 | 2502234 | 5677125 | 5688150 | 250 | 56.740 | 128.983 | 71.993 | none are great, this is the least bad
+
+Runtime and resume
+First playback starts at 0 and keeps the intro. Region tracks use SDL_mixer
+with zero whole-file repeats, polling the decoded cursor from the main/game
+thread and seeking to the approved start at the hard end. A failed boundary
+seek logs an error and returns to whole-file playback. Unmatched or stale
+files retain the existing whole-file mode. Explore and Combat retain separate
+runtime positions and the existing 1000 ms sequential transitions, stock
+combat threat/hold, legacy Explore filenames, and missing-track fallbacks.
+An intro position resumes exactly. An out-of-range body position is reduced by
+the hard-loop period into [start, hard_end). The old within-five-seconds-of-end
+restart guard applies only when no valid loop metadata is loaded. Deck and
+load resets clear positions; no position or break timer enters save data.
+
+Exploration Music Breaks
+Preference: exploration_music_breaks = false (default). This is a prefs.txt
+setting; the legacy in-game options screen was not expanded. On the QA app,
+set the key to true after stopping the game, or run
+python scripts/install-qa-soundtrack.py --exploration-music-breaks on
+after stopping the QA app. Only owned external Explore playback accrues eligible
+game time.
+The music-on interval is independently randomized between 360 and 600 seconds;
+the silent interval between 60 and 150 seconds. A separate xorshift audio RNG
+is seeded from SDL ticks and never touches gameplay RNG. Both outgoing and
+incoming intentional-rest fades last 2000 ms. The rest silences only the music
+stream; SFX, ambience, machinery, enemy sounds and audiologs retain their
+existing paths. A naturally completed rest restarts Explore at 0 for a fresh
+intro. Combat interrupts rest immediately, starts Combat with the existing
+1000 ms entrance, and resets the next rest schedule. After Combat, Explore
+returns; the interrupted rest does not resume. Menu/theme suspension,
+backgrounding and non-gameplay updates do not consume either timer. New game,
+load and deck changes reset the rest state and schedule. Missing external
+Explore never enters an artificial rest over stock music. The feature remains
+OFF until hardware listening confirms it is useful.
+
+QA-only accelerated build option: -Prp5npAudio4FastBreaks=true on assembleQa
+or scripts/build.ps1 -Variant qa -Audio4FastBreaks
+uses 30–45 seconds on and 15–25 seconds rest. Normal QA and production builds
+use the full ranges. This option changes no saved preferences and is not a
+runtime slider. Tests inject exact tick targets instead of waiting minutes.
+
+Verification and limits
+- Manifest policy and source-hash tests: PASS (Python standard library tests).
+- Actual 22 user-owned source SHA-256 checks: PASS.
+- ARM64 deterministic mixer mock: PASS for looping, stale position normalization,
+  optional rest cycles, menu suspension and Combat interruption.
+- ARM64 no-mixer portability and AUDIO3 dynamic transition tests: PASS.
+- ARM64 SHA-256 known-vector fixture: PASS.
+- Production preference parser fixture on ARM64: PASS.
+- ARM64 QA APK build: PASS, SHA-256
+  86b682677733164546863b7469c0027a885a706f1427b223e2be4f90064fb79b.
+  Path: AndroidProject/app/build/outputs/apk/qa/app-qa.apk. It contains only
+  ARM64 native libraries and no soundtrack MP3 assets. Package identity,
+  signature and 16 KB ZIP/ELF native alignment verification: PASS.
+- Real SDL_mixer 2.8.1/minimp3 Windows dummy-device smoke: PASS with locally
+  generated 15-second MP3 tones. It exercised the intro, three repeated hard
+  loop seeks, intentional Explore fade and silence, restart at zero, Combat
+  interruption and return to Explore while SFX remained active. The harness
+  used test-only metadata and short deterministic durations; no soundtrack
+  assets were used. A separate standalone Android dummy-audio attempt crashed
+  in libSDL2.so before reaching a boundary, so that harness remains unverified.
+- Hardware listening: Medical Explore loop PASS for continuous playback;
+  other tracks and optional breaks remain pending.
+
+Phone install correction — 2026-10-04
+The first installed AUDIO4 QA build failed to match the existing legacy
+medical.mp3 Explore filename, and phone logs showed "metadata unavailable" and
+"full-track loop". The filename rule is fixed and covered by a regression test.
+The corrected APK above was installed as an update; the installed base.apk
+SHA-256 exactly matches the local corrected APK. A production-mode Windows
+SDL_mixer probe copied the user's hash-matching Medical MP3 to ignored scratch,
+started the intro at 0, loaded medical_explore metadata through medical.mp3,
+and sought from reported 207.627 s to the approved 83.760 s start: PASS. The
+scratch copy was removed afterward. On the corrected installed QA build, the
+user loaded Medical and confirmed its music was playing. The live phone log
+recorded medical_explore metadata loading at 13:13:11, region-loop playback,
+and the first boundary at 13:16:39 (reported 207.331 s), seeking to the
+approved 83.760 s loop start. A second boundary occurred at 13:18:42
+(reported 207.337 s), the expected 123.5-second loop interval, with no seek
+failure or playback stop: PASS. On follow-up listening, the user reported no
+gap. The cut is noticeable when listening for it, matches the test audition,
+and would probably go unnoticed otherwise. Medical Explore hardware listening:
+PASS for continuous playback, with an audible but acceptable cut.
+
+Full Remake phone pack — 2026-10-04
+The phone initially held all 11 legacy Explore files and Medical Combat only.
+After the user saved and closed the QA game, the remaining ten approved Combat
+sources were verified, copied into the app's private music/remake directory,
+and checked on the phone. All 22 installed MP3 SHA-256 values match the 22
+selected-loop source hashes. The QA preference is soundtrack = remake and
+exploration_music_breaks = false. The game remained closed for installation.
+All 22 files are eligible for their corresponding loop regions; Medical Explore
+is the only region confirmed through repeated live boundaries and listening.
+Other tracks still need listening on hardware for seam quality and transitions.
+
+Hardware QA checklist
+1. Medical Combat and other Explore/Combat decks: listen through boundaries;
+   confirm intro once, no authored outro, and no click/pop/stall.
+2. With breaks OFF, confirm existing continuous Explore and Combat transitions.
+3. With breaks ON, confirm ambience/SFX during silence, Explore restart at 0,
+   Combat override and schedule reset. Use the optional accelerated QA build
+   for timing convenience.
+4. Background during music and rest, then resume: timers must not advance while
+   suspended. Switch deck and load: new schedule begins.
+5. Check logs for metadata loaded/mismatch, boundary seeks, rest begin/complete,
+   Combat interruption and no per-frame countdown spam.

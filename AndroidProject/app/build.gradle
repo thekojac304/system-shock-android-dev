@@ -60,10 +60,12 @@ android {
             signingConfig signingConfigs.debug
             // TEMPORARY AUDLIFE, opt in with -Prp5npAudioDiagnostics=true.
             def audioDiagnostics = project.findProperty('rp5npAudioDiagnostics') == 'true'
+            def audio4FastBreaks = project.findProperty('rp5npAudio4FastBreaks') == 'true'
             buildConfigField 'boolean', 'AUDIO_DIAGNOSTICS', audioDiagnostics.toString()
             externalNativeBuild {
                 cmake {
                     arguments "-DRP5NP_AUDIO_DIAGNOSTICS=${audioDiagnostics ? 'ON' : 'OFF'}"
+                    arguments "-DAUDIO4_QA_FAST_BREAKS=${audio4FastBreaks ? 'ON' : 'OFF'}"
                     arguments "-DRP5NP_QA_TOOLS=ON"
                 }
             }

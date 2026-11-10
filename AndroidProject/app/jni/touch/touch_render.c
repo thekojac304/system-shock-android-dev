@@ -75,8 +75,8 @@ static void radial(const TouchControls *t,SDL_Renderer *r) {
         const TouchRadialEntry *entry=&wheel->entries[i];
         if (i==wheel->highlighted || entry->current) {
             bool chosen=i==wheel->highlighted;
-            color(r,chosen ? 39 : 54,chosen ? 100 : 81,chosen ? 116 : 85,
-                  chosen ? 225 : 170,fmaxf(.7f,t->settings.opacity));
+            color(r,chosen ? 122 : 54,chosen ? 91 : 81,chosen ? 38 : 85,
+                  chosen ? 225 : 155,fmaxf(.7f,t->settings.opacity));
             for (float a=angle-half+.008f;a<angle+half-.008f;a+=1.0f/R)
                 SDL_RenderDrawLineF(r,wheel->cx+cosf(a)*inner,wheel->cy+sinf(a)*inner,
                                     wheel->cx+cosf(a)*(R-2),wheel->cy+sinf(a)*(R-2));
@@ -86,12 +86,20 @@ static void radial(const TouchControls *t,SDL_Renderer *r) {
         float edge=angle-half;
         SDL_RenderDrawLineF(r,wheel->cx+cosf(edge)*inner,wheel->cy+sinf(edge)*inner,
                             wheel->cx+cosf(edge)*R,wheel->cy+sinf(edge)*R);
+        if (i==wheel->highlighted && entry->available) {
+            color(r,255,213,110,255,fmaxf(.78f,t->settings.opacity));
+            for (float a=angle-half+.025f;a<angle+half-.025f;a+=1.0f/R)
+                SDL_RenderDrawLineF(r,wheel->cx+cosf(a)*(R-3),wheel->cy+sinf(a)*(R-3),
+                                    wheel->cx+cosf(a)*R,wheel->cy+sinf(a)*R);
+        }
         char label[sizeof(entry->label)];
         snprintf(label,sizeof(label),"%s",entry->label);
         for (char *p=label;*p;++p) if (*p>='a' && *p<='z') *p=(char)(*p-'a'+'A');
         float x=wheel->cx+cosf(angle)*R*.68f,y=wheel->cy+sinf(angle)*R*.68f;
-        color(r,entry->available ? 237 : 132,entry->available ? 249 : 145,
-              entry->available ? 247 : 150,255,fmaxf(.7f,t->settings.opacity));
+        color(r,i==wheel->highlighted ? 255 : entry->available ? 237 : 132,
+              i==wheel->highlighted ? 224 : entry->available ? 249 : 145,
+              i==wheel->highlighted ? 150 : entry->available ? 247 : 150,
+              255,fmaxf(.74f,t->settings.opacity));
         text(r,label,x,y,t->layout.height/270,R*.64f);
         if (entry->current) {
             color(r,255,213,110,255,fmaxf(.7f,t->settings.opacity));
@@ -113,7 +121,15 @@ static void radial(const TouchControls *t,SDL_Renderer *r) {
     }
     circle(r,(TouchCircle){wheel->cx,wheel->cy,inner},false,false,1,fmaxf(1,R/110));
     color(r,241,243,228,255,1);
-    text(r,"CANCEL",wheel->cx,wheel->cy,t->layout.height/290,inner*1.6f);
+    if (wheel->highlighted>=0 && wheel->highlighted<wheel->count &&
+        wheel->entries[wheel->highlighted].available) {
+        char chosen[sizeof(wheel->entries[0].label)];
+        snprintf(chosen,sizeof(chosen),"%s",wheel->entries[wheel->highlighted].label);
+        for (char *p=chosen;*p;++p) if (*p>='a' && *p<='z') *p=(char)(*p-'a'+'A');
+        text(r,chosen,wheel->cx,wheel->cy-inner*.12f,t->layout.height/310,inner*1.7f);
+        color(r,255,213,110,255,1);
+        text(r,"RELEASE",wheel->cx,wheel->cy+inner*.28f,t->layout.height/410,inner*1.5f);
+    } else text(r,"CANCEL",wheel->cx,wheel->cy,t->layout.height/290,inner*1.6f);
 }
 static bool held(const TouchControls *t,int id) {
     if (id==TC_FIRE) return t->fire_count>0;
@@ -209,8 +225,14 @@ static const char *ui_label(const TouchControls *t,int action) {
     if (action==TU_QA_GOD) return t->qa_god ? "GOD MODE ON" : "GOD MODE OFF";
     if (action==TU_QA_HEAL) return "FULL HEALTH / ENERGY";
     if (action==TU_QA_LOADOUT) return "FULL QA LOADOUT";
+    if (action==TU_QA_ASSIST) return t->qa_assist_debug ? "TOUCH HITBOXES  ON" : "TOUCH HITBOXES  OFF";
     if (action==TU_QA_CLOSE) return "CLOSE";
     if (action>=TU_QA_DECK_FIRST && action<=TU_QA_DECK_LAST) return decks[action-TU_QA_DECK_FIRST];
+    if (action==TU_AUDIO) return "AUDIO SETTINGS";
+    if (action==TU_AUDIO_BACK) return "< BACK";
+    if (action==TU_AUDIO_SOUNDTRACK) return t->audio.remake ? "SOUNDTRACK  REMAKE" : "SOUNDTRACK  ORIGINAL";
+    if (action==TU_AUDIO_DYNAMIC) return t->audio.dynamic ? "DYNAMIC MUSIC  ON" : "DYNAMIC MUSIC  OFF";
+    if (action==TU_AUDIO_ENABLE) return t->audio.enhanced ? "ENHANCED AMBIENCE  ON" : "ENHANCED AMBIENCE  OFF";
     static const char *names[TU_COUNT]={"EDIT LAYOUT","-","+","-","+","-","+",
         "INVERT Y OFF","-","+","RESET TOUCH SETTINGS","CANCEL","SAVE / DONE",
         "<",">","SIZE -","SIZE +","SETTINGS","MOVE TOOLBAR","MORE >",
@@ -242,11 +264,28 @@ static void panel(const TouchControls *t,SDL_Renderer *r) {
         text(r,"QA TOOLS",w*.5f,h*.07f,h/185,w*.5f);
         text(r,t->qa_status ? t->qa_status : "",w*.5f,h*.12f,h/300,w*.80f);
         text(r,"TELEPORT",w*.5f,h*.275f,h/300,w*.5f);
-    } else if (t->panel==TOUCH_UI_SETTINGS) {
+    } else if (t->panel==TOUCH_UI_SETTINGS || t->panel==TOUCH_UI_AUDIO) {
         color(r,4,10,17,160,1); rect(r,(TouchRect){0,0,w,h},true);
         color(r,15,28,40,250,1); rect(r,(TouchRect){w*.18f,h*.035f,w*.64f,h*.94f},true);
         color(r,208,241,244,255,1);
-        text(r,"TOUCH SETTINGS",w*.5f,h*.09f,h/185,w*.5f);
+        text(r,t->panel==TOUCH_UI_AUDIO?"AUDIO SETTINGS":"TOUCH SETTINGS",w*.5f,h*.09f,h/185,w*.5f);
+        if (t->panel==TOUCH_UI_AUDIO) {
+            const char *names[4]={"MASTER","MUSIC","SFX","AMBIENT"};
+            const int values[4]={t->audio.master,t->audio.music,t->audio.sfx,t->audio.ambient};
+            const float rows[4]={.16f,.26f,.36f,.46f};
+            for (int i=0;i<4;++i) {
+                float y=h*rows[i];
+                snprintf(value,sizeof(value),"%s  %d%%",names[i],values[i]);
+                color(r,224,243,241,255,1);
+                text(r,value,w*.5f,y+h*.021f,h/285,w*.49f);
+                color(r,34,73,83,255,1);
+                rect(r,(TouchRect){w*.26f,y+h*.052f,w*.48f,h*.009f},true);
+                color(r,97,215,220,255,1);
+                rect(r,(TouchRect){w*.26f,y+h*.052f,w*.48f*values[i]/100,h*.009f},true);
+                rect(r,(TouchRect){w*(.26f+.48f*values[i]/100)-h*.012f,y+h*.045f,h*.024f,h*.024f},true);
+            }
+        }
+        if (t->panel==TOUCH_UI_SETTINGS) {
         const float values[4]={t->settings.opacity*100,t->settings.sensitivity_x,
                               t->settings.sensitivity_y,t->settings.control[TC_STICK].scale};
         const char *names[4]={"OPACITY","LOOK X","LOOK Y","STICK SIZE"};
@@ -255,6 +294,7 @@ static void panel(const TouchControls *t,SDL_Renderer *r) {
             if (i==0) snprintf(value,sizeof(value),"%s %.0f%%",names[i],values[i]);
             else snprintf(value,sizeof(value),"%s %.2f",names[i],values[i]);
             text(r,value,w*.5f,h*rows[i],h/255,w*.33f);
+        }
         }
     } else {
         if (t->ui_drag) return; /* captured drag can cross either toolbar edge */
@@ -272,6 +312,7 @@ static void panel(const TouchControls *t,SDL_Renderer *r) {
     for (int a=0;a<TU_COUNT;++a) {
         TouchRect b=touch_ui_bounds(t,(TouchUiAction)a);
         if (b.w<=0) continue;
+        if (t->panel==TOUCH_UI_AUDIO && a>=TU_AUDIO_MASTER && a<=TU_AUDIO_AMBIENT) continue;
         bool down=t->ui_owned && t->ui_action==a;
         color(r,down ? 43 : 26,down ? 119 : 51,down ? 129 : 65,255,1); rect(r,b,true);
         color(r,a==TU_SAVE ? 105 : 115,a==TU_SAVE ? 222 : 161,190,255,1); rect(r,b,false);
@@ -283,6 +324,62 @@ static void panel(const TouchControls *t,SDL_Renderer *r) {
         text(r,"SAVE FAILED - RETRY OR CANCEL",w*.5f,h*.125f,h/310,w*.60f);
     }
 }
+#ifdef RP5NP_QA_TOOLS
+static void assist_visual(const TouchControls *t,SDL_Renderer *r) {
+    const TouchAssistVisual *v=&t->assist_visual;
+    if (!t->qa_enabled || !t->qa_assist_debug || !v->valid ||
+        t->panel!=TOUCH_UI_CLOSED) return;
+    if (v->selected && v->stage==TOUCH_ASSIST_TAP) {
+        color(r,55,210,220,215,1);
+        rect(r,v->cluster,false);
+        color(r,95,245,185,235,1);
+        rect(r,v->effective,false);
+        color(r,255,185,65,245,1);
+        rect(r,v->original,false);
+        SDL_RenderDrawLineF(r,v->selected_x-12,v->selected_y,v->selected_x+12,v->selected_y);
+        SDL_RenderDrawLineF(r,v->selected_x,v->selected_y-12,v->selected_x,v->selected_y+12);
+    }
+    color(r,255,255,255,255,1);
+    SDL_RenderDrawLineF(r,v->raw_x-11,v->raw_y,v->raw_x+11,v->raw_y);
+    SDL_RenderDrawLineF(r,v->raw_x,v->raw_y-11,v->raw_x,v->raw_y+11);
+    char status[48];
+    if (v->stage==TOUCH_ASSIST_DOWN) snprintf(status,sizeof(status),"TOUCH DOWN");
+    else if (v->stage==TOUCH_ASSIST_DRAG) snprintf(status,sizeof(status),"DRAG - NO TAP");
+    else if (v->stage==TOUCH_ASSIST_NO_TAP) snprintf(status,sizeof(status),"NO TAP SENT");
+    else if (v->stage==TOUCH_ASSIST_CANCEL) snprintf(status,sizeof(status),"TOUCH CANCELED");
+    else if (!v->selected) snprintf(status,sizeof(status),"TAP - NO ASSIST");
+    else if (v->kind && strcmp(v->kind,"inventory-tab")==0)
+        snprintf(status,sizeof(status),"AIM INVENTORY TAB %d",v->index);
+    else if (v->kind && strcmp(v->kind,"side-icon")==0)
+        snprintf(status,sizeof(status),"AIM SIDE ICON");
+    else if (v->kind && strcmp(v->kind,"mfd-selector")==0)
+        snprintf(status,sizeof(status),"AIM MFD SELECTOR");
+    else if (v->kind && strcmp(v->kind,"mfd-button")==0)
+        snprintf(status,sizeof(status),"AIM MFD BUTTON");
+    else snprintf(status,sizeof(status),"AIM UI CONTROL");
+    /* Keep the diagnostic key in the normally empty letterbox when one is
+       available. It names intent, not confirmed activation by the game. */
+    float bar=(t->layout.width-t->layout.height*4.0f/3.0f)*.5f;
+    float width=fmaxf(180.0f,fminf(t->layout.width*.25f,bar*.94f));
+    float left=bar>width ? (bar-width)*.5f : 12.0f;
+    float top=t->layout.height*.105f;
+    float line=t->layout.height*.028f;
+    TouchRect key={left,top,width,line*5.1f};
+    color(r,5,19,26,220,1);rect(r,key,true);
+    color(r,103,192,204,245,1);rect(r,key,false);
+    float cx=left+width*.5f,fs=fmaxf(2.0f,t->layout.height/320.0f);
+    color(r,240,239,211,255,1);
+    text(r,status,cx,top+line*.65f,fs,width*.94f);
+    color(r,255,255,255,255,1);
+    text(r,"WHITE TOUCH",cx,top+line*1.65f,fs,width*.90f);
+    color(r,55,210,220,255,1);
+    text(r,"CYAN GROUP",cx,top+line*2.65f,fs,width*.90f);
+    color(r,95,245,185,255,1);
+    text(r,"GREEN REACH",cx,top+line*3.65f,fs,width*.90f);
+    color(r,255,185,65,255,1);
+    text(r,"AMBER AIM",cx,top+line*4.65f,fs,width*.90f);
+}
+#endif
 void touch_draw(const TouchControls *t,SDL_Renderer *r) {
     if (!t->enabled || (!t->gameplay_available && !t->pause_available) || t->controller) return;
     Uint8 red,green,blue,alpha;
@@ -303,6 +400,9 @@ void touch_draw(const TouchControls *t,SDL_Renderer *r) {
     if (t->panel==TOUCH_UI_CLOSED) visual_compare(t,r);
     if (t->panel==TOUCH_UI_CLOSED) radial(t,r);
     if (t->panel!=TOUCH_UI_CLOSED) panel(t,r);
+#ifdef RP5NP_QA_TOOLS
+    assist_visual(t,r);
+#endif
     SDL_SetRenderDrawBlendMode(r,blend);
     SDL_SetRenderDrawColor(r,red,green,blue,alpha);
     SDL_RenderSetViewport(r,&viewport);

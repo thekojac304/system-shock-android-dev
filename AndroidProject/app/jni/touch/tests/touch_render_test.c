@@ -10,7 +10,7 @@ static Uint8 color[4]={12,34,56,78};
 static SDL_BlendMode blend=SDL_BLENDMODE_ADD;
 static SDL_Rect clip={11,22,33,44};
 static SDL_bool clipped=SDL_TRUE;
-static int draws, fire_center_lines, ammo_center_lines;
+static int draws, fire_center_lines, ammo_center_lines, cluster_fills;
 static Uint8 max_alpha;
 static FILE *capture;
 static TouchControls t;
@@ -55,6 +55,9 @@ int SDL_RenderDrawLineF(SDL_Renderer *r,float x1,float y1,float x2,float y2) {
 }
 int SDL_RenderFillRectF(SDL_Renderer *r,const SDL_FRect *rect) {
     (void)r; (void)rect; assert(!clipped && blend==SDL_BLENDMODE_BLEND); draws++;
+    if (rect->x==t.assist_visual.cluster.x && rect->y==t.assist_visual.cluster.y &&
+        rect->w==t.assist_visual.cluster.w && rect->h==t.assist_visual.cluster.h)
+        cluster_fills++;
     if (color[3]>max_alpha) max_alpha=color[3];
     if (capture) fprintf(capture,"[\"fill\",%u,%u,%u,%u,%.3f,%.3f,%.3f,%.3f]\n",
         color[0],color[1],color[2],color[3],rect->x,rect->y,rect->w,rect->h);
@@ -76,6 +79,20 @@ static void restored(void) {
 int main(int argc,char **argv) {
     touch_init(&t,NULL,NULL); touch_configure(&t,1920,960,true,true,false);
     touch_draw(&t,NULL); assert(draws>0 && fire_center_lines>0); restored();
+#ifdef RP5NP_QA_TOOLS
+    t.qa_enabled=t.qa_assist_debug=true;
+    t.assist_visual=(TouchAssistVisual){.valid=true,.selected=true,
+        .cluster={150,700,180,80},.effective={160,710,100,60},
+        .original={170,720,45,25},.raw_x=185,.raw_y=732,
+        .selected_x=192,.selected_y=733,.kind="inventory-tab",.index=6};
+    int normal_draws=draws;
+    touch_draw(&t,NULL); assert(draws>normal_draws && cluster_fills==0); restored();
+    normal_draws=draws;
+    touch_draw(&t,NULL); assert(draws>normal_draws); restored(); /* persists */
+    t.assist_visual.stage=TOUCH_ASSIST_NO_TAP;t.assist_visual.selected=false;
+    touch_draw(&t,NULL); restored(); /* canceled/held taps have a distinct key */
+    t.qa_assist_debug=false;
+#endif
     assert(t.layout.fire.x>1600); /* fire is drawn/hit in the right black bar */
     touch_finger(&t,TOUCH_DOWN,1,1,t.layout.fire.x,t.layout.fire.y,0);
     assert(t.fire_count==1); /* drawn center is also the touch hit target */

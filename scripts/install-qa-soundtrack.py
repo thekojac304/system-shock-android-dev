@@ -13,20 +13,26 @@ import tempfile
 import uuid
 
 PACKAGE = 'io.github.raposomiguel50.systemshock.qa'
-FILENAMES = tuple(name + '.mp3' for name in (
+FILENAMES = tuple(name + suffix + '.mp3' for name in (
     'medical', 'research', 'reactor', 'maintenance', 'storage', 'flightdeck',
-    'executive', 'groves', 'engineering', 'security', 'bridge'))
+    'executive', 'groves', 'engineering', 'security', 'bridge')
+    for suffix in ('', '_explore', '_combat'))
 
 
-def update_preferences(raw, mode):
+def update_preferences(raw, mode=None, breaks=None):
     # Decode strictly: never silently replace unrelated preference bytes.
     text = raw.decode('utf-8-sig')
+    keys = ([] if mode is None else ['soundtrack']) + ([] if breaks is None else ['exploration_music_breaks'])
     lines = [line for line in text.splitlines(keepends=True)
-             if not re.match(r'^\s*soundtrack\s*=', line, re.I)]
+             if not any(re.match(r'^\s*' + key + r'\s*=', line, re.I) for key in keys)]
     text = ''.join(lines)
     if text and not text.endswith(('\n', '\r')):
         text += '\n'
-    return (text + 'soundtrack = ' + mode + '\n').encode('utf-8')
+    if mode is not None:
+        text += 'soundtrack = ' + mode + '\n'
+    if breaks is not None:
+        text += 'exploration_music_breaks = ' + ('true' if breaks == 'on' else 'false') + '\n'
+    return text.encode('utf-8')
 
 
 class Device:
@@ -76,12 +82,13 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('source', nargs='?', type=Path, help='Local folder of user-owned MP3s')
     parser.add_argument('--soundtrack', choices=('original', 'remake'))
+    parser.add_argument('--exploration-music-breaks', choices=('off', 'on'))
     parser.add_argument('--serial', default='')
     sdk_adb = Path(os.environ.get('LOCALAPPDATA', '')) / 'Android/Sdk/platform-tools/adb.exe'
     parser.add_argument('--adb', default=str(sdk_adb) if sdk_adb.is_file() else 'adb')
     args = parser.parse_args()
-    if args.source is None and args.soundtrack is None:
-        parser.error('Supply a local source directory and/or --soundtrack.')
+    if args.source is None and args.soundtrack is None and args.exploration_music_breaks is None:
+        parser.error('Supply a local source directory and/or a preference option.')
     recognized = {}
     if args.source is not None:
         if not args.source.is_dir():
@@ -103,9 +110,9 @@ def main():
         raise RuntimeError('Save your game and stop the QA app first; no data has been changed.')
     # Check prefs BEFORE copying tracks so setup errors are non-mutating.
     prefs = updated = None
-    if args.soundtrack:
+    if args.soundtrack or args.exploration_music_breaks:
         prefs = device.read('files/prefs.txt')
-        updated = update_preferences(prefs, args.soundtrack)
+        updated = update_preferences(prefs, args.soundtrack, args.exploration_music_breaks)
     if recognized:
         device.shell('mkdir -p files/music/remake')
         for name in FILENAMES:
@@ -119,7 +126,8 @@ def main():
         backup_file.write_bytes(prefs)
         device.put('files/prefs.txt', data=updated)
         print('Original preferences: ' + str(backup_file))
-        print('Soundtrack: ' + args.soundtrack + ' (UTF-8 without BOM)')
+        if args.soundtrack: print('Soundtrack: ' + args.soundtrack)
+        if args.exploration_music_breaks: print('Exploration Music Breaks: ' + args.exploration_music_breaks)
     print('Start the QA app. No other files or app data were changed.')
 
 

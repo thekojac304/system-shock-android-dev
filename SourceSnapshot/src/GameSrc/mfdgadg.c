@@ -65,6 +65,37 @@ typedef struct _mfd_bttnarray {
     void *cbdata;
 } MFDBttnArray;
 
+#ifdef __ANDROID__
+#include "touch_assist.h"
+bool touch_mfd_array_assist(MFD *mfd,MFDhandler *h,short *x,short *y,TouchAssistDebug *debug) {
+    if (!mfd || !h || h->proc!=mfd_buttonarray_handlerproc || !h->data) return false;
+    MFDBttnArray *ba=(MFDBttnArray *)h->data;
+    int count=ba->bdims.x*ba->bdims.y;
+    if (count<1 || count>64 || ba->bsize.x<1 || ba->bsize.y<1) return false;
+    TouchAssistRect rects[64];
+    int n=0;
+    for (int row=0;row<ba->bdims.y;++row) for (int col=0;col<ba->bdims.x;++col) {
+        int left=mfd->rect.ul.x+h->r.ul.x+col*(ba->bsize.x+ba->bspace.x);
+        int top=mfd->rect.ul.y+h->r.ul.y+row*(ba->bsize.y+ba->bspace.y);
+        rects[n++]=(TouchAssistRect){left,top,left+ba->bsize.x,top+ba->bsize.y,1};
+    }
+    TouchAssistRect cluster={rects[0].x0-10,rects[0].y0-10,
+                             rects[n-1].x1+10,rects[n-1].y1+10,1};
+    if (cluster.x0<mfd->rect.ul.x) cluster.x0=mfd->rect.ul.x;
+    if (cluster.y0<mfd->rect.ul.y) cluster.y0=mfd->rect.ul.y;
+    if (cluster.x1>mfd->rect.lr.x) cluster.x1=mfd->rect.lr.x;
+    if (cluster.y1>mfd->rect.lr.y) cluster.y1=mfd->rect.lr.y;
+    int chosen=touch_assist_pick_cluster(rects,n,cluster,*x,*y,10);
+    if (chosen<0) return false;
+    int cx=(rects[chosen].x0+rects[chosen].x1)/2;
+    int cy=(rects[chosen].y0+rects[chosen].y1)/2;
+    if (cx<mfd->rect.ul.x || cx>=mfd->rect.lr.x || cy<mfd->rect.ul.y || cy>=mfd->rect.lr.y)
+        return false;
+    touch_assist_debug_set(debug,rects[chosen],cluster,10);
+    *x=(short)cx; *y=(short)cy; return true;
+}
+#endif
+
 uchar mfd_buttonarray_handlerproc(MFD *mfd, uiEvent *ev, MFDhandler *h) {
     MFDBttnArray *ba = (MFDBttnArray *)(h->data);
     LGPoint bttn;

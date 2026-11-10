@@ -244,6 +244,32 @@ bool touch_side_icon_at(const LGRegion *region, int x, int y) {
     return false;
 }
 
+#ifdef __ANDROID__
+#include "touch_assist.h"
+bool touch_side_icon_assist(short *x,short *y,TouchAssistDebug *debug) {
+    extern uchar fullscrn_icons;
+    if (global_fullmap->cyber || (full_game_3d && !fullscrn_icons)) return false;
+    TouchAssistRect rects[NUM_SIDE_ICONS];
+    for (int i=0;i<NUM_SIDE_ICONS;++i) {
+        rects[i]=(TouchAssistRect){side_icons[i].r.ul.x,side_icons[i].r.ul.y,
+            side_icons[i].r.lr.x,side_icons[i].r.lr.y,
+            get_player_ware_version(icon_data[i].waretype,
+                IDX_OF_TYPE(icon_data[i].waretype,icon_data[i].waretrip))!=0};
+    }
+    /* Two separate side clusters stop the viewport and the MFD row from
+       becoming magnetic. Each icon is 15x15 with an 8-pixel gap. */
+    TouchAssistRect left={0,SIDE_ICONS_TOP_Y-12,30,135,1};
+    TouchAssistRect right={290,SIDE_ICONS_TOP_Y-12,320,135,1};
+    TouchAssistRect cluster=*x<160?left:right;
+    int chosen=touch_assist_pick_cluster(rects,NUM_SIDE_ICONS,cluster,*x,*y,14);
+    if (chosen<0) return false;
+    touch_assist_debug_set(debug,rects[chosen],cluster,14);
+    *x=(short)((rects[chosen].x0+rects[chosen].x1)/2);
+    *y=(short)((rects[chosen].y0+rects[chosen].y1)/2);
+    return true;
+}
+#endif
+
 void screen_init_side_icons(LGRegion *root) {
     int id;
     LGRegion *left_region, *right_region;

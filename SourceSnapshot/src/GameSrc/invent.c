@@ -27,6 +27,9 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 // Source code for inventory manipulation / display
 
 #include <string.h>
+#ifdef RP5NP_QA_TOOLS
+#include <SDL.h>
+#endif
 
 #include "email.h"
 #include "invent.h"
@@ -2150,6 +2153,48 @@ uchar inventory_handle_rightbutton(uiEvent *ev, LGRegion *reg, inv_display *dp, 
 
 #define SEARCH_MARGIN 2
 
+#ifdef __ANDROID__
+#include "touch_assist.h"
+static bool touch_inventory_row_at(int x,int y) {
+    int relx=x-INVENTORY_PANEL_X;
+    int i=0;
+    inv_display *dp=NULL;
+    for (;gen_inv_page(inventory_page,&i,&dp);++i) {
+        if (relx<dp->left || relx>dp->right) continue;
+        int row=get_item_at_pixrow(dp,y);
+        if (row>=0 && row<dp->listlen) return true;
+    }
+    return false;
+}
+bool touch_inventory_page_assist(short *x,short *y,TouchAssistDebug *debug) {
+    if (!pagebutton_region || (pagebutton_region->status_flags & INVISIBLE_FLAG) ||
+        *y < BUTTON_PANEL_Y-18 || *y >= 200 ||
+        *x < INVENTORY_PANEL_X || *x >= INVENTORY_PANEL_X+INVENTORY_PANEL_WIDTH)
+        return false;
+    /* Reach above Android's bottom home-gesture zone without stealing a
+       populated inventory row. The original mouse rectangles are untouched. */
+    if (*y<BUTTON_PANEL_Y && touch_inventory_row_at(*x,*y)) return false;
+    TouchAssistRect rects[NUM_PAGE_BUTTONS];
+    TouchAssistRect assisted[NUM_PAGE_BUTTONS];
+    for (int i=0;i<NUM_PAGE_BUTTONS;++i) {
+        int left=INVENTORY_PANEL_X+FIRST_BTTN_X+i*BUTTON_X_STEP;
+        rects[i]=(TouchAssistRect){left,BUTTON_PANEL_Y+INVENT_BTTN_Y,
+            left+INVENT_BTTN_WD,BUTTON_PANEL_Y+INVENT_BTTN_Y+INVENT_BTTN_HT,
+            page_button_state[i]!=BttnDummy && (!global_fullmap->cyber || i==INV_SOFTWARE_PAGE)};
+        assisted[i]=rects[i];
+        assisted[i].y0=BUTTON_PANEL_Y-18;
+    }
+    TouchAssistRect cluster={INVENTORY_PANEL_X,BUTTON_PANEL_Y-18,
+                             INVENTORY_PANEL_X+INVENTORY_PANEL_WIDTH,200,1};
+    int chosen=touch_assist_pick_cluster(assisted,NUM_PAGE_BUTTONS,cluster,*x,*y,12);
+    if (chosen<0) return false;
+    touch_assist_debug_set(debug,rects[chosen],cluster,12);
+    if (debug) { debug->effective.y0=cluster.y0; debug->index=chosen+1; }
+    *x=(short)((rects[chosen].x0+rects[chosen].x1)/2);
+    *y=(short)((rects[chosen].y0+rects[chosen].y1)/2);
+    return true;
+}
+#endif
 bool touch_inventory_object_at(int x, int y) {
     int relx = x - INVENTORY_PANEL_X;
     int i = 0;
@@ -2290,6 +2335,12 @@ uchar pagebutton_mouse_handler(uiEvent *ev, LGRegion *r, intptr_t data) {
     pos.y -= INVENTORY_PANEL_Y;
 
     cnum = (pos.x - FIRST_BTTN_X) / BUTTON_X_STEP;
+#ifdef RP5NP_QA_TOOLS
+    if (ev->mouse_data.action & MOUSE_LDOWN)
+        SDL_Log("MOBILE-POLISH1 inventory press ui=%d,%d tab=%d state=%d page=%d full=%d",
+                pos.x,pos.y,cnum,cnum>=0 && cnum<NUM_PAGE_BUTTONS ? page_button_state[cnum] : -1,
+                inventory_page,full_game_3d);
+#endif
     if (full_game_3d && global_fullmap->cyber && cnum != INV_SOFTWARE_PAGE) {
         last_invent_cnum = cnum;
         uiSetRegionDefaultCursor(r, NULL);

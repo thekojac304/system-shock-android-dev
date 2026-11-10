@@ -1,0 +1,31 @@
+/* Generated from AUDIO4 human review by select_review.py. */
+#ifndef SHOCK_AUDIO4_LOOPS_H
+#define SHOCK_AUDIO4_LOOPS_H
+#include <stdint.h>
+typedef struct { const char *track, *sha256; uint32_t rate; uint64_t start, hard_end, end; unsigned fade_ms; } Audio4Loop;
+static const Audio4Loop audio4_loops[] = {
+    {"bridge_combat", "f311ca5cd700964e067923ce1cae9f5cf0a78706a40400194c5771d6d4b63ffd", 44100, 4826921ULL, 7649321ULL, 7649321ULL, 0},
+    {"bridge_explore", "79e6990fc118bfc9b0b454be7f9d9611345252bb202ec75b4b80b58f6df7f789", 44100, 2843833ULL, 5664910ULL, 5664910ULL, 0},
+    {"engineering_combat", "1120def62d5afbbb17ea635903d86f537303dffe7949c116a75e91bbf410f584", 44100, 2950687ULL, 7978175ULL, 7978175ULL, 0},
+    {"engineering_explore", "6e9609740d5a21bfb19a20d498763bf5d211059932e58ce5a86e75210e26fcf1", 44100, 2206544ULL, 5515014ULL, 5515014ULL, 0},
+    {"executive_combat", "5f158dfec2be0d98b7a7cadbb3feb172a5daca9a2d2e9887971a1f4218da3f64", 44100, 3696197ULL, 7224197ULL, 7224197ULL, 0},
+    {"executive_explore", "0c98433a3ed6a2de72f7a6d1718f5364551002054be8fa03beff96df80cdbfad", 44100, 4497230ULL, 9491246ULL, 9491246ULL, 0},
+    {"flightdeck_combat", "8f8114644dcc65bd5389af8487a409bd76e1f6dd60fb7e5f62a46a7ffdde1b98", 44100, 4607833ULL, 7755206ULL, 7755206ULL, 0},
+    {"flightdeck_explore", "c24b48ae8dea219feaecd2de96256c615c901b978ae6f8e4f990063c4543fd41", 44100, 2426294ULL, 4671998ULL, 4671998ULL, 0},
+    {"groves_combat", "a050399e37771a270fcb52b4b0d13140ef0711aaeb24e62a2415e821e5a98b44", 44100, 4480163ULL, 7840627ULL, 7840627ULL, 0},
+    {"groves_explore", "8ec61ce65c76c0bb0bdfcd52edce0fea5e6f1e3fbcf8e087e333843323e3c321", 44100, 4890734ULL, 8875301ULL, 8875301ULL, 0},
+    {"maintenance_combat", "c5197a2bf2c0635f1cb62011faaee0fe36c033aafea6867e831f11e370be6d5e", 44100, 4121277ULL, 6572576ULL, 6572576ULL, 0},
+    {"maintenance_explore", "5bcc3e807bb3e080bf6fe4139053a230cbeee8487e5e232e0b518bdf867fa622", 44100, 3783956ULL, 6892764ULL, 6892764ULL, 0},
+    {"medical_combat", "a851750074d21fbbb291fc264efb2d364e5f0a1d0bbc1e54842aca788e5ce9fd", 44100, 1716548ULL, 5757277ULL, 5757277ULL, 0},
+    {"medical_explore", "04046c1ac544d7627a3161a57053cdf702aff610a61eddd38f409af03a55a065", 44100, 3693816ULL, 9142636ULL, 9153661ULL, 250},
+    {"reactor_combat", "49520012ca43173c1472e4a7a4aafe729063fdc184005b4922054afc6c898f4b", 44100, 3471023ULL, 7167264ULL, 7167264ULL, 0},
+    {"reactor_explore", "abdcf8832808683bc6295cc0cd5d86ff2f2f55bd4a744b19d978a13f90bc0a2c", 44100, 2274193ULL, 6471499ULL, 6471499ULL, 0},
+    {"research_combat", "15c4491cde425445289f7c6639496a56c7a172a53397a7dfcdd62758c44c1171", 44100, 2658657ULL, 7168896ULL, 7169999ULL, 25},
+    {"research_explore", "a35b086ce18fa2edcc3debe175ac3a8e3c3a7682aa487198a78c15c7031e3123", 44100, 5046231ULL, 9444765ULL, 9444765ULL, 0},
+    {"security_combat", "66978accf4c5ba41f7aa4c9431f16d3c74f963956de3292751649da97f9d28c5", 44100, 2266564ULL, 4871859ULL, 4871859ULL, 0},
+    {"security_explore", "4d4f7388fa27274d65c49b60936d113fdb8fde85fa3540eea010e18ee5da3097", 44100, 1719724ULL, 6751975ULL, 6763000ULL, 250},
+    {"storage_combat", "3249b1692a403f23b4b308b1fdf40a4b0bfed89437485f117142abb95a611b4c", 44100, 1482157ULL, 5110970ULL, 5110970ULL, 0},
+    {"storage_explore", "07c06d48051717bcb5de8fe274bbf9b44404a53ca5580613bec6857078c13cbb", 44100, 2502234ULL, 5677125ULL, 5688150ULL, 250},
+};
+#define AUDIO4_LOOP_COUNT (sizeof(audio4_loops)/sizeof(audio4_loops[0]))
+#endif

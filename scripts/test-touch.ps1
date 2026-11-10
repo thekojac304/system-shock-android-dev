@@ -9,6 +9,12 @@ $Touch = Join-Path $Root 'AndroidProject/app/jni/touch'
 $Core = @((Join-Path $Touch 'touch_controls.c'), (Join-Path $Touch 'touch_settings.c'), (Join-Path $Touch 'touch_editor.c'), (Join-Path $Touch 'touch_radial.c'))
 $Output = Join-Path $Root 'dist/touch-tests'
 New-Item -ItemType Directory -Force -Path $Output | Out-Null
+$AudioMenuExe = Join-Path $Output 'touch_audio_menu_test.exe'
+& $Compiler "-B$CompilerBin/" -std=c11 -Wall -Wextra -Werror -pedantic -O2 -DTOUCH_HEADLESS "-I$Touch" `
+    @Core (Join-Path $Touch 'tests/touch_audio_menu_test.c') -lm -o $AudioMenuExe
+if ($LASTEXITCODE -ne 0) { throw "Touch audio menu compilation failed: $LASTEXITCODE" }
+& $AudioMenuExe
+if ($LASTEXITCODE -ne 0) { throw "Touch audio menu tests failed: $LASTEXITCODE" }
 $QaExe = Join-Path $Output 'touch_qa_test.exe'
 & $Compiler "-B$CompilerBin/" -std=c11 -Wall -Wextra -Werror -pedantic -O2 -DTOUCH_HEADLESS "-I$Touch" `
     @Core (Join-Path $Touch 'tests/touch_qa_test.c') -lm -o $QaExe
@@ -40,7 +46,7 @@ if ($LASTEXITCODE -ne 0) { throw "Touch surface test compilation failed: $LASTEX
 & $SurfaceExe
 if ($LASTEXITCODE -ne 0) { throw "Touch surface tests failed: $LASTEXITCODE" }
 $BridgeExe = Join-Path $Output 'touch_bridge_test.exe'
-& $Compiler "-B$CompilerBin/" -std=c11 -Wall -Wextra -Werror -pedantic -O2 -DTOUCH_HEADLESS `
+& $Compiler "-B$CompilerBin/" -std=c11 -Wall -Wextra -Werror -pedantic -O2 -DTOUCH_HEADLESS -DTOUCH_TEST_ASSIST `
     "-I$(Join-Path $Touch 'tests/stubs')" "-I$Touch" `
     @Core `
     (Join-Path $Touch 'tests/touch_bridge_test.c') -lm -o $BridgeExe
@@ -72,6 +78,12 @@ $TargetExe = Join-Path $Output 'touch_target_test.exe'
 if ($LASTEXITCODE -ne 0) { throw "Touch target test compilation failed: $LASTEXITCODE" }
 & $TargetExe
 if ($LASTEXITCODE -ne 0) { throw "Touch target tests failed: $LASTEXITCODE" }
+$AssistExe = Join-Path $Output 'touch_assist_test.exe'
+& $Compiler "-B$CompilerBin/" -std=c11 -Wall -Wextra -Werror -pedantic -O2 "-I$Touch" `
+    (Join-Path $Touch 'tests/touch_assist_test.c') -o $AssistExe
+if ($LASTEXITCODE -ne 0) { throw "Touch assist compilation failed: $LASTEXITCODE" }
+& $AssistExe
+if ($LASTEXITCODE -ne 0) { throw "Touch assist tests failed: $LASTEXITCODE" }
 
 # Compile the real SDL queue adapter in one TU with explicit platform doubles.
 # Compile the core separately so engine precompiled headers do not leak into it.
@@ -105,7 +117,7 @@ if ($LASTEXITCODE -ne 0) { throw "Touch menu test compilation failed: $LASTEXITC
 if ($LASTEXITCODE -ne 0) { throw "Touch menu tests failed: $LASTEXITCODE" }
 
 $RenderExe = Join-Path $Output 'touch_render_test.exe'
-& $Compiler "-B$CompilerBin/" -std=c11 -Wall -Wextra -Werror -pedantic -O2 -DDECLSPEC= -DSDL_MAIN_HANDLED `
+& $Compiler "-B$CompilerBin/" -std=c11 -Wall -Wextra -Werror -pedantic -O2 -DDECLSPEC= -DSDL_MAIN_HANDLED -DRP5NP_QA_TOOLS `
     "-I$(Join-Path $Root '.deps/SDL2/include')" "-I$Touch" `
     @Core (Join-Path $Touch 'touch_render.c') (Join-Path $Touch 'tests/touch_render_test.c') -lm -o $RenderExe
 if ($LASTEXITCODE -ne 0) { throw "Touch render test compilation failed: $LASTEXITCODE" }

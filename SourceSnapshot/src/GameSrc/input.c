@@ -58,6 +58,7 @@ static char sbcopy[] = "Spaceball Interface Copyright 1994 Spaceball Technologie
 #include "mfdint.h"
 #include "mfdext.h"
 #include "mfdgump.h"
+#include "mfddims.h"
 #include "sideicon.h"
 #include "leanmetr.h"
 #include "MacTune.h"
@@ -81,6 +82,7 @@ static char sbcopy[] = "Spaceball Interface Copyright 1994 Spaceball Technologie
 #ifdef __ANDROID__
 #include "touch_shock_bridge.h"
 #include "touch_cursor_target.h"
+#include "touch_assist.h"
 #endif
 
 #ifdef __ANDROID__
@@ -3525,6 +3527,12 @@ uchar toggle_profile(ushort keycode, uint32_t context, intptr_t data) {
    up an item. Inventory rows with a use handler likewise use LDOUBLE. */
 #ifdef __ANDROID__
 extern MFD mfd[NUM_MFDS];
+static void touch_assist_rect_to_game(TouchAssistRect *r) {
+    short x0=(short)r->x0,y0=(short)r->y0,x1=(short)r->x1,y1=(short)r->y1;
+    ss_mouse_convert(&x0,&y0,FALSE);
+    ss_mouse_convert(&x1,&y1,FALSE);
+    r->x0=x0; r->y0=y0; r->x1=x1; r->y1=y1;
+}
 static bool touch_ui_object_region(const LGRegion *region, int x, int y) {
     if (input_cursor_mode == INPUT_OBJECT_CURSOR) return false;
     for (int i = 0; i < NUM_MFDS; ++i) {
@@ -3562,6 +3570,89 @@ TouchCursorTarget touch_cursor_target_at(int x, int y) {
     if (touch_region_contains(inventory, ux, uy) &&
         touch_ui_object_region(inventory, ux, uy)) return TOUCH_TARGET_UI_OBJECT;
     return TOUCH_TARGET_UI_CONTROL;
+}
+
+/* Only the Android touch tap bridge calls this. Mouse, keyboard, controller,
+   visible UI rectangles and engine dispatch retain their original semantics. */
+bool touch_ui_assist_game_point(int *x,int *y,TouchAssistDebug *debug_out) {
+    extern bool touch_side_icon_assist(short *,short *,TouchAssistDebug *);
+    extern bool touch_inventory_page_assist(short *,short *,TouchAssistDebug *);
+    extern bool touch_mfd_array_assist(MFD *,MFDhandler *,short *,short *,TouchAssistDebug *);
+    extern uchar wrapper_panel_on,olh_overlay_on;
+    TouchAssistDebug detail={0};
+    if (debug_out) *debug_out=detail;
+    if (!x || !y || !global_fullmap || global_fullmap->cyber ||
+        (_current_loop!=GAME_LOOP && _current_loop!=FULLSCREEN_LOOP && _current_loop!=SVGA_LOOP) ||
+        wrapper_panel_on || olh_overlay_on || game_paused || input_cursor_mode==INPUT_OBJECT_CURSOR)
+        return false;
+    short ux=(short)*x,uy=(short)*y;
+    ss_mouse_convert(&ux,&uy,TRUE);
+    short old_x=ux,old_y=uy;
+    const char *kind=NULL;
+    if (touch_side_icon_assist(&ux,&uy,&detail)) kind="side-icon";
+    else if (touch_inventory_page_assist(&ux,&uy,&detail)) kind="inventory-tab";
+    else for (int side=0;side<NUM_MFDS;++side) {
+        MFD *m=&mfd[side];
+        LGRegion *panel=full_game_3d?&m->bttn.reg2:&m->bttn.reg;
+        if (!(panel->status_flags & INVISIBLE_FLAG) &&
+            old_y>=135 && old_y<MFD_BTTN_Y+MFD_BTTN_HGT+8 &&
+            (side==MFD_LEFT ? old_x>=0 && old_x<16 : old_x>=304 && old_x<320)) {
+            TouchAssistRect rows[MFD_NUM_VIRTUAL_SLOTS];
+            for (int slot=0;slot<MFD_NUM_VIRTUAL_SLOTS;++slot) {
+                int top=MFD_BTTN_Y+slot*(MFD_BTTN_SZ+MFD_BTTN_BLNK);
+                int left=side==MFD_LEFT?MFD_BTTN_LFTX:MFD_BTTN_RGTX;
+                rows[slot]=(TouchAssistRect){left,top,left+MFD_BTTN_WID,top+MFD_BTTN_SZ,
+                    player_struct.mfd_slot_status[slot]!=MFD_UNAVAIL};
+            }
+            TouchAssistRect cluster={side==MFD_LEFT?0:304,135,
+                                     side==MFD_LEFT?16:320,MFD_BTTN_Y+MFD_BTTN_HGT+8,1};
+            int selected=touch_assist_pick_cluster(rows,MFD_NUM_VIRTUAL_SLOTS,
+                                                    cluster,old_x,old_y,11);
+            if (selected>=0) {
+                ux=(short)((rows[selected].x0+rows[selected].x1)/2);
+                uy=(short)((rows[selected].y0+rows[selected].y1)/2);
+                touch_assist_debug_set(&detail,rows[selected],cluster,11);
+                kind="mfd-selector"; break;
+            }
+        }
+        LGRegion *view=full_game_3d?&m->reg2:&m->reg;
+        if (!touch_region_contains(view,old_x,old_y)) continue;
+        int func=mfd_get_func(side,player_struct.mfd_current_slots[side]);
+        if (func<0 || func>=MFD_NUM_FUNCS) break;
+        MFD_Func *f=&mfd_funcs[func];
+        int best_button_distance=1000000;
+        for (int h=0;h<f->handler_count;++h) {
+            short tx=old_x,ty=old_y;
+            TouchAssistDebug candidate={0};
+            if (touch_mfd_array_assist(m,&f->handlers[h],&tx,&ty,&candidate)) {
+                int distance=touch_assist_distance_sq(candidate.original,old_x,old_y);
+                if (distance<best_button_distance) {
+                    best_button_distance=distance;
+                    ux=tx;uy=ty;detail=candidate;kind="mfd-button";
+                }
+            }
+        }
+        break;
+    }
+    if (!kind) return false;
+    detail.kind=kind;
+    if (debug_out) {
+        detail.touch_x=old_x; detail.touch_y=old_y;
+        touch_assist_rect_to_game(&detail.original);
+        touch_assist_rect_to_game(&detail.effective);
+        touch_assist_rect_to_game(&detail.cluster);
+        short sx=(short)detail.selected_x,sy=(short)detail.selected_y;
+        ss_mouse_convert(&sx,&sy,FALSE);
+        detail.selected_x=sx;detail.selected_y=sy;
+        *debug_out=detail;
+    }
+#ifdef RP5NP_QA_TOOLS
+    if (gShockPrefs.qaCheats)
+        SDL_Log("MOBILE-POLISH1 touch assist %s touch=%d,%d selected=%d,%d",kind,old_x,old_y,ux,uy);
+#endif
+    ss_mouse_convert(&ux,&uy,FALSE);
+    *x=ux;*y=uy;
+    return true;
 }
 #endif
 

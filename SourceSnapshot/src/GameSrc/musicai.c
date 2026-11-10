@@ -41,6 +41,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "adlmidi.h"
 #include "Xmi.h"
 #include "ExternalMusic.h"
+#include "AmbientDirector.h"
 #include "mainloop.h"
 
 #ifdef RP5NP_AUDIO_DIAGNOSTICS
@@ -150,6 +151,31 @@ void musicai_clear() {
     mai_damage_sum = 0;
     last_damage_sum = 0;
     mlimbs_combat = 0;
+    ExternalMusicResetRuntime();
+}
+
+/* Music-only housekeeping must continue when external playback suppresses
+ * MIDI sequencing. Keep the stock timer, damage decay and Bridge exception. */
+static void update_music_threat(void) {
+    if (!music_on) return;
+    if (mlimbs_combat != 0 && mlimbs_combat < player_struct.game_time)
+        mlimbs_combat = 0;
+    layer_danger = 0;
+    if (mai_damage_sum > danger_damage_level)
+        layer_danger = 2;
+    else if (player_struct.hit_points < danger_hp_level)
+        layer_danger = 1;
+    if ((last_damage_sum + damage_decay_time) < player_struct.game_time) {
+        mai_damage_sum -= damage_decay_amount;
+        if (mai_damage_sum < 0) mai_damage_sum = 0;
+        last_damage_sum = player_struct.game_time;
+    }
+    if ((score_playing == BRIDGE_ZONE) && in_peril) {
+        mlimbs_peril = DEFAULT_PERIL_MIN;
+        mlimbs_combat = 0;
+    } else if ((mlimbs_combat > 0) || in_peril) {
+        mlimbs_peril = DEFAULT_PERIL_MAX;
+    }
 }
 
 void mlimbs_do_ai() {
@@ -160,9 +186,21 @@ void mlimbs_do_ai() {
     /* Deck eligibility is independent of tile music zones (including the
      * elevators). Do not swallow the SFX work below when overriding. */
     extern uchar curr_vol_lev;
+    extern uchar game_paused, wrapper_panel_on, olh_overlay_on;
     int gameplay = music_on &&
                    (_current_loop == GAME_LOOP || _current_loop == FULLSCREEN_LOOP ||
                     _current_loop == AUTOMAP_LOOP) && !player_struct.dead && !global_fullmap->cyber;
+    update_music_threat();
+    AmbientDirectorUpdate(player_struct.level,
+                          (_current_loop == GAME_LOOP || _current_loop == FULLSCREEN_LOOP ||
+                           _current_loop == AUTOMAP_LOOP) && !player_struct.dead &&
+                          !global_fullmap->cyber && !game_paused &&
+                          !wrapper_panel_on && !olh_overlay_on,
+                          mlimbs_combat > 0, gShockPrefs.soEnhancedAmbience,
+                          gShockPrefs.soAmbientVolume);
+    ExternalMusicThreat(mlimbs_combat, player_struct.game_time);
+    ExternalMusicSetBreaks(gShockPrefs.soExplorationMusicBreaks);
+    ExternalMusicSetDynamic(gShockPrefs.soDynamicMusic);
     int external = ExternalMusicUpdate(gShockPrefs.soSoundtrack,
                                        player_struct.level, gameplay, curr_vol_lev);
     if (external) {
@@ -201,35 +239,6 @@ void mlimbs_do_ai() {
     }
 
     if (music_on) {
-        if (mlimbs_combat != 0) {
-            if (mlimbs_combat < player_struct.game_time)
-                mlimbs_combat = 0;
-        }
-
-        // Set danger layer
-        layer_danger = 0;
-        if (mai_damage_sum > danger_damage_level)
-            layer_danger = 2;
-        else if (player_struct.hit_points < danger_hp_level)
-            layer_danger = 1;
-
-        // Decay damage
-        if ((last_damage_sum + damage_decay_time) < player_struct.game_time) {
-            mai_damage_sum -= damage_decay_amount;
-            if (mai_damage_sum < 0)
-                mai_damage_sum = 0;
-            last_damage_sum = player_struct.game_time;
-        }
-
-        if ((score_playing == BRIDGE_ZONE) && in_peril) {
-            mlimbs_peril = DEFAULT_PERIL_MIN;
-            mlimbs_combat = 0;
-        } else {
-            if ((mlimbs_combat > 0) || in_peril) {
-                mlimbs_peril = DEFAULT_PERIL_MAX;
-            }
-        }
-
         // KLC - moved here from grind_music_ai, so it can do this check at all times.
         if (global_fullmap->cyber) {
             MapElem *pme;

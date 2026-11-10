@@ -75,8 +75,13 @@ static const char *PREF_LANGUAGE = "language";
 static const char *PREF_CAPTUREMOUSE = "capture-mouse";
 static const char *PREF_INVERTMOUSEY = "invert-mousey";
 static const char *PREF_MUSIC_VOL = "music-volume";
+static const char *PREF_MASTER_VOL = "master-volume";
+static const char *PREF_AMBIENT_VOL = "ambient-volume";
+static const char *PREF_DYNAMIC_MUSIC = "dynamic-music";
+static const char *PREF_ENHANCED_AMBIENCE = "enhanced-ambience";
 static const char *PREF_REPLACEMENT_MEDICAL = "replacement_medical_music";
 static const char *PREF_SOUNDTRACK = "soundtrack";
+static const char *PREF_EXPLORATION_MUSIC_BREAKS = "exploration_music_breaks";
 static const char *PREF_SFX_VOL = "sfx-volume";
 static const char *PREF_ALOG_VOL = "alog-volume";
 static const char *PREF_VIDEOMODE = "video-mode";
@@ -93,6 +98,20 @@ static const char *PREF_MIDI_OUTPUT = "midi-output";
 
 static void SetShockGlobals(void);
 
+static int parse_percent(const char *value, int *out) {
+    char *end;
+    long parsed = strtol(value, &end, 10);
+    while (*end == ' ' || *end == '\t' || *end == '\r' || *end == '\n') ++end;
+    if (end == value || *end || parsed < 0 || parsed > 100) return 0;
+    *out = (int)parsed;
+    return 1;
+}
+static int parse_switch(const char *value, bool *out) {
+    if (!strcasecmp(value,"true") || !strcasecmp(value,"yes") || !strcmp(value,"1")) { *out=true; return 1; }
+    if (!strcasecmp(value,"false") || !strcasecmp(value,"no") || !strcmp(value,"0")) { *out=false; return 1; }
+    return 0;
+}
+
 //--------------------------------------------------------------------
 //	  Initialize the preferences to their default settings.
 //--------------------------------------------------------------------
@@ -103,6 +122,11 @@ void SetDefaultPrefs(void) {
     gShockPrefs.goPopupLabels = true;
     gShockPrefs.soBackMusic = true;
     gShockPrefs.soSoundtrack = SOUNDTRACK_ORIGINAL;
+    gShockPrefs.soDynamicMusic = true;
+    gShockPrefs.soEnhancedAmbience = false;
+    gShockPrefs.soMasterVolume = 100;
+    gShockPrefs.soAmbientVolume = 70;
+    gShockPrefs.soExplorationMusicBreaks = false;
 #ifdef RP5NP_QA_TOOLS
     gShockPrefs.qaCheats = false;
 #endif
@@ -178,6 +202,7 @@ int16_t LoadPrefs(void) {
     FILE *f = fopen(GetPrefsPathFilename(), "r");
     if (!f) {
         // file can't be open, write default preferences
+        SetShockGlobals();
         return SavePrefs();
     }
 
@@ -185,6 +210,11 @@ int16_t LoadPrefs(void) {
      * regardless of line order. Saving migrates the old setting. */
     int soundtrack_seen = 0, legacy_remake = 0;
     gShockPrefs.soSoundtrack = SOUNDTRACK_ORIGINAL;
+    gShockPrefs.soDynamicMusic = true;
+    gShockPrefs.soEnhancedAmbience = false;
+    gShockPrefs.soMasterVolume = 100;
+    gShockPrefs.soAmbientVolume = 70;
+    gShockPrefs.soExplorationMusicBreaks = false;
     char line[64];
     gShockPrefs.doHorrorVisuals = false;
     gShockPrefs.postEnabled = 1;
@@ -239,21 +269,31 @@ int16_t LoadPrefs(void) {
         } else if (strcasecmp(key, PREF_SOUNDTRACK) == 0) {
             gShockPrefs.soSoundtrack = ExternalMusicMode(value);
             soundtrack_seen = 1;
+        } else if (strcasecmp(key, PREF_DYNAMIC_MUSIC) == 0) {
+            parse_switch(value, &gShockPrefs.soDynamicMusic);
+        } else if (strcasecmp(key, PREF_ENHANCED_AMBIENCE) == 0) {
+            parse_switch(value, &gShockPrefs.soEnhancedAmbience);
+        } else if (strcasecmp(key, PREF_MASTER_VOL) == 0) {
+            int vol; if (parse_percent(value, &vol)) gShockPrefs.soMasterVolume = vol;
+        } else if (strcasecmp(key, PREF_AMBIENT_VOL) == 0) {
+            int vol; if (parse_percent(value, &vol)) gShockPrefs.soAmbientVolume = vol;
+        } else if (strcasecmp(key, PREF_EXPLORATION_MUSIC_BREAKS) == 0) {
+            gShockPrefs.soExplorationMusicBreaks = is_true(value);
         } else if (strcasecmp(key, PREF_MUSIC_VOL) == 0) {
-            int vol = atoi(value);
-            if (vol >= 0 && vol <= 100) {
+            int vol;
+            if (parse_percent(value,&vol)) {
                 gShockPrefs.soBackMusic = vol > 0;
                 gShockPrefs.soMusicVolume = vol;
             }
         } else if (strcasecmp(key, PREF_SFX_VOL) == 0) {
-            int vol = atoi(value);
-            if (vol >= 0 && vol <= 100) {
+            int vol;
+            if (parse_percent(value,&vol)) {
                 gShockPrefs.soSoundFX = vol > 0;
                 gShockPrefs.soSfxVolume = vol;
             }
         } else if (strcasecmp(key, PREF_ALOG_VOL) == 0) {
-            int vol = atoi(value);
-            if (vol >= 0 && vol <= 100)
+            int vol;
+            if (parse_percent(value,&vol))
                 gShockPrefs.soAudioLogVolume = vol;
         } else if (strcasecmp(key, PREF_VIDEOMODE) == 0) {
             int mode = atoi(value);
@@ -321,7 +361,12 @@ int16_t SavePrefs(void) {
     fprintf(f, "%s = %s\n", PREF_CAPTUREMOUSE, gShockPrefs.goCaptureMouse ? "yes" : "no");
     fprintf(f, "%s = %s\n", PREF_INVERTMOUSEY, gShockPrefs.goInvertMouseY ? "yes" : "no");
     fprintf(f, "%s = %d\n", PREF_MUSIC_VOL, curr_vol_lev);
+    fprintf(f, "%s = %d\n", PREF_MASTER_VOL, gShockPrefs.soMasterVolume);
+    fprintf(f, "%s = %d\n", PREF_AMBIENT_VOL, gShockPrefs.soAmbientVolume);
     fprintf(f, "%s = %s\n", PREF_SOUNDTRACK, ExternalMusicModeName(gShockPrefs.soSoundtrack));
+    fprintf(f, "%s = %s\n", PREF_DYNAMIC_MUSIC, gShockPrefs.soDynamicMusic ? "true" : "false");
+    fprintf(f, "%s = %s\n", PREF_ENHANCED_AMBIENCE, gShockPrefs.soEnhancedAmbience ? "true" : "false");
+    fprintf(f, "%s = %s\n", PREF_EXPLORATION_MUSIC_BREAKS, gShockPrefs.soExplorationMusicBreaks ? "true" : "false");
 #ifdef RP5NP_QA_TOOLS
     fprintf(f, "qa_cheats = %s\n", gShockPrefs.qaCheats ? "true" : "false");
 #endif
@@ -353,6 +398,10 @@ int16_t SavePrefs(void) {
 //  Set the corresponding Shock globals from the prefs structure.
 //--------------------------------------------------------------------
 static void SetShockGlobals(void) {
+#ifdef __ANDROID__
+    extern void rp5np_audio_set_master_volume(int percent);
+    rp5np_audio_set_master_volume(gShockPrefs.soMasterVolume);
+#endif
     popup_cursors = gShockPrefs.goPopupLabels;
     olh_active = gShockPrefs.goOnScreenHelp;
     which_lang = gShockPrefs.goLanguage;

@@ -31,6 +31,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "sndcall.h"
 #include "tools.h"
 #include "trigger.h"
+#include "AudioVolumeCurve.h"
 #ifdef AUDIOLOGS
 #include "audiolog.h"
 #endif
@@ -198,7 +199,7 @@ uchar set_sample_pan_gain(snd_digi_parms *sdp) {
      */
     if (vol == VOL_FULL)
         vol = 127;
-    vol = vol * curr_sfx_vol / 100;
+    vol = AudioVolumeScale(curr_sfx_vol, vol);
     sdp->vol = vol * temp_vol / VOL_FULL;
     snd_sample_reload_parms(sdp);
     return (FALSE);
@@ -319,7 +320,9 @@ int play_digi_fx_master(int sfx_code, int num_loops, ObjID id, ushort x, ushort 
 #ifdef AUDIOLOGS
     if (sfx_code != real_code) {
         s_dprm.data = 0;
-        s_dprm.vol = volumes[sfx_code] * curr_sfx_vol / 100;
+        int source_vol=(uchar)volumes[sfx_code];
+        if (source_vol==VOL_FULL) source_vol=127;
+        s_dprm.vol = AudioVolumeScale(curr_sfx_vol, source_vol);
     } else
 #endif
     {

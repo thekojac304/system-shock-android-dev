@@ -1,0 +1,209 @@
+AUDIO3 - Dynamic Remake Explore / Combat
+Investigation before implementation - 2026-10-03
+
+BASELINE
+Branch: touch-controls
+HEAD: fa57a8b04af804e9698e585722dc83ee90273f2c
+Message: Add AUDIO2 QA tools and touch QoL improvements
+git status --short: empty. Exact validated baseline, clean working tree.
+No commit or push authorized for this implementation before hardware review.
+
+SOURCE FINDINGS / DESIGN
+1. newai.c:do_stealth_stuff -> ai_spot_player calls ai.c:ai_critter_seen for a nonfriendly,
+   awake critter after successful visibility detection. run_combat_ai calls
+   musicai.c:mai_attack on entering an attack posture. Both refresh
+   mlimbs_combat to game_time + 1000. CIT_CYCLE is 280 ticks/second: about
+   3.57 game seconds, affected by pause/reflex game-time scaling. Player gunfire
+   alone does not set this timer; environmental damage feeds danger layers.
+2. musicai.c:mlimbs_do_ai expires that timer. Damage above 40 or HP below 10
+   selects danger layers; damage decays by 6 every >300 game ticks. The Bridge
+   peril-zone exception clears combat and sets minimum peril. Preserve it.
+3. gamesys.c:check_nearby_objects refreshes peril about once a game second.
+   Awake nonfriendly critters within distance <4 set it, without a visibility
+   requirement. physics.c also sets in_peril from map tiles. Startup sets high
+   peril. This is not a reliable active-combat signal and has no third content
+   model here. PERIL remains Explore externally.
+4. airupt.c:grind_music_ai chooses Walking, Peril, then Combat only when the
+   combat timer is set, actual_score is Peril/Combat and peril_bars >2.
+   peril_bars advances on Peril sequencing calls, not elapsed seconds.
+   mlimbs_do_ai drives sequencing when track 0 has ended (IsPlaying), despite
+   its stale six-second-timer comment. MacTuneQueueTune is a stub; requests
+   start via make_request/StartTrack. Transitions and layering are theme-table
+   driven. There is no universal fixed stock audible engage/release latency.
+5. On disengagement the timer normally expires after ~3.57 seconds; proximity
+   or map peril can keep stock at Peril. objsim.c critter destruction calls
+   mai_monster_defeated, clearing the GLOBAL combat timer even with other
+   enemies alive. mai_monster_nearby(NO_MONSTER) also clears it but has no
+   caller in this tree; gamesys directly assigns mlimbs_monster instead.
+6. AUDIO2 returns before timer expiry/danger housekeeping and MIDI sequencing.
+   Keep only that existing housekeeping block running before the external
+   update, while leaving MIDI sequencing suppressed. Drive AUDIO3 from the
+   live combat deadline, not stale score enums or proximity. No AI changes.
+7. Hysteresis: retain the last observed stock deadline even if another critter's
+   death clears it early. This bridges the evidenced global-clear weakness
+   without adding another arbitrary cooldown. No additional minimum dwell.
+   Engage on a fresh live threat signal. Initial AUDIO3 used 500 ms fade out /
+   500 ms fade in; the AUDIO3.1 tuning test uses 1000 ms for each sequential
+   fade because the user reported that the handoff was too obvious. Hardware
+   result for the longer sequential fade transition: PENDING.
+   Release at the retained deadline plus fades. Poll only during normal updates.
+8. Pinned SDL_mixer 2.8.1 music.c: FadeOut is asynchronous; PlayMusic/FadeInMusic
+   and FreeMusic can WAIT for an outgoing fade. Never call them on the outgoing
+   stream until PlayingMusic is false, or explicitly HaltMusic first on teardown.
+   No finished callback, sleeping loop, extra thread or device needed. Keep the
+   latest requested state while fading; re-engagement retargets that one pending
+   transition. Cache at most two MP3 decoder objects per visit, one playing
+   slot; open Combat only on first demand, before fading a working Explore.
+9. Prefer <deck>_explore.mp3, then legacy <deck>.mp3; optional <deck>_combat.mp3.
+   All AUDIO2 mappings/preferences remain, Original default. Missing/invalid
+   Explore variants -> stock for that visit. Missing/invalid Combat -> continue
+   Explore; latch the failure until departure. Playback failure -> Explore if
+   still usable, else stock. Never alternate external and stock per threat.
+10. Deck change disposes the old visit and starts destination Explore. Discard
+    an inherited combat deadline on that boundary; a refreshed enemy signal
+    engages naturally on the destination. musicai_clear resets external threat
+    memory on load/new session, including same-deck loads. No save fields.
+11. In-game pause continues music with frozen threat time. Android continues
+    using existing SDL device suspension; decoder/fade ownership survives.
+    Theme/menu suspension retains decoders and pending fade. Resume the paused
+    fade before polling it; never start a track over a suspended outgoing fade.
+    Process death starts fresh. No new Android lifecycle callbacks or timers.
+12. Audiolog still changes curr_vol_lev through UpdateVolumeXMI. Every new
+    playback uses current ducked volume. Avoid writing identical mixer volume
+    every frame: it overrides SDL's current fade gain. A real volume change is
+    applied immediately; the mixer applies its fade envelope next callback.
+13. Minimal files: ExternalMusic.c/.h (owner/state/paths), musicai.c (housekeeping
+    and input/reset), installer (accept variant names), audio tests, this doc.
+    Existing QA tools suffice; concise transition logs instead of a new UI.
+14. Risks: long MP3 open/index latency remains synchronous as in AUDIO2;
+    two retained decoders add bounded memory. Fades restart a selected track
+    from its beginning. No simultaneous stems or seamless OST loop editing.
+    Source timing is not audible hardware evidence. Enemy visibility frequency,
+    suitable fade lengths, resume behavior and repeated-transition latency
+    require listening on device. Maintenance elevator remains intermittent /
+    not reproduced on retest, unknown cause; no fix claimed or behavior changed.
+
+IMPLEMENTATION / VALIDATION RESULTS
+Implemented the design above. Original is still the default; no preferences,
+game save structures, AI, balance, touch, elevator, SFX, speech, Android device
+lifecycle or XMI ownership code changed. Existing Xmi.c hooks are reused.
+Two cached decoder handles share ONE SDL_mixer music slot. A re-engagement
+during return fade finishes that fade and restarts Combat with a fade-in;
+it does not briefly start Explore or reopen the file. Deck changes halt/free
+both handles. Unsupported Combat, failed start or unexpected Combat stop is
+latched and uses Explore; Explore failure restores stock for that visit.
+
+AUTOMATED PASS (logs under ignored dist/audio3/):
+- scripts/test-audio1.ps1: production mixer/no-mixer owner; all legacy AUDIO2
+  mappings, lifecycle, missing/invalid files, failure latches, ducking, cleanup.
+- scripts/test-audio3.ps1: asynchronous fade completion, no play/free while
+  outgoing fade is pending, no repeated fade/load/log/volume writes, retained
+  stock deadline after enemy death, re-engagement during return, repeated
+  transitions, suspend/resume mid-fade, same-deck load reset, deck change with
+  inherited threat, fresh destination threat, teardown mid-fade, missing and
+  invalid Combat, playback and stream failure, Explore-to-stock fallback,
+  preferred Explore naming, legacy names and no-mixer/Original behavior.
+- scripts/test-audio2.py: actual prefs parsing/migration, all deck IDs, 33
+  recognized installer names, UTF-8 preservation and failed-transfer safety.
+- scripts/test-elevator.ps1: 20 Maintenance-route ownership cycles plus
+  no-mixer. This does NOT reproduce or fix the intermittent elevator freeze.
+- scripts/test-touch.ps1: all QA/touch suites, including menu tap and AMMO.
+- tests/audio/external_music_smoke.c: pinned SDL 2.32.10 / SDL_mixer 2.8.1
+  Windows dummy device, existing generated 0.25s tones copied into ignored
+  dist/audio3/runtime. Actual MP3 decoding/loops, repeated outgoing/incoming
+  fades, retarget while fading, update calls below 250ms on tiny fixtures,
+  device pause and theme suspension during fade, gain 20% throughout new
+  starts, continued SFX/postmix and stock callback restoration. This is NOT
+  an Android device or long-OST latency test. No soundtrack assets included.
+
+Host compiler: existing retcomm Clang 22.1.8 gcc.exe, -Wall -Wextra -Werror.
+Commands (from repository root; supply the existing compiler's absolute path):
+  scripts/test-audio1.ps1 -Compiler <gcc.exe>
+  scripts/test-audio3.ps1 -Compiler <gcc.exe>
+  python scripts/test-audio2.py --compiler <gcc.exe>
+  scripts/test-elevator.ps1 -Compiler <gcc.exe>
+  scripts/test-touch.ps1 -Compiler <gcc.exe>
+
+BUILD PASS: ARM64 QA, established scripts/build.ps1 -Variant qa
+  -SkipGitCleanCheck
+  -JavaHome 'C:/Program Files/Eclipse Adoptium/jdk-17.0.20.101-hotspot'
+APK VERIFY PASS: scripts/verify-apk.ps1 -Variant qa (identity, debug signature,
+  resource checks, 16 KB native ZIP and ELF alignment).
+APK: AndroidProject/app/build/outputs/apk/qa/app-qa.apk
+Named handoff copy: dist/audio3/SystemShock-AUDIO3-Dynamic-qa.apk
+Package: io.github.raposomiguel50.systemshock.qa
+Version: 1.0.0-qa / 10000; optional lifecycle diagnostics OFF.
+SHA256: 3d60eb5f42ac77d626659a2b8cab12d5adf84c25716c7ab519421b1465c65926
+
+SOURCE-LEVEL VERIFIED: live sighting/attack callers, expiry/damage housekeeping
+before the external early return, Bridge exception, save-load clear path,
+stock MIDI suppression, audiolog curr_vol_lev forwarding, SDL pause semantics.
+These source checks do not establish audible gameplay timing or device PASS.
+No Linux/full-desktop/native-MIDI/FluidSynth build or RP5 certification claimed.
+Whitespace check passes with the repository's existing CRLF convention:
+  git -c core.whitespace=cr-at-eol diff --check
+
+Hardware AUDIO3 status: PENDING. Prior user-reported AUDIO2 acceptance remains
+historical evidence only; it does not certify AUDIO3.
+No APK installed, device state changed, soundtrack downloaded, commit or push.
+
+INSTALL / FILES
+Save your session and stop QA before installing owned tracks. Use the existing
+helper, which now accepts all three suffixes for each of the eleven deck names:
+  python scripts/install-qa-soundtrack.py "C:\MyMusic\Remake" --soundtrack remake
+It retains its binary-safe transfer, running-app refusal and backup behavior.
+Use files/music/remake/<deck>_explore.mp3 and optional <deck>_combat.mp3;
+<deck>.mp3 remains a legacy Explore fallback. Names are lowercase on Android.
+Deck names: medical, research, reactor, maintenance, storage, flightdeck,
+executive, groves, engineering, security, bridge. All three Groves share groves.
+Missing/corrupt preferred Explore is tried once, then legacy. Missing both
+means stock music. A Combat-only installation still falls back to stock.
+After fixing a failed file, leave/revisit that deck or restart the app.
+Install QA using adb install -r; do not uninstall or clear app data.
+
+HARDWARE CHECKLIST (all AUDIO3 items pending user results)
+Prepare an owned Explore/Combat pair for a test deck, enable qa_cheats=true,
+keep music volume audible. Use existing SET > QA TOOLS / God Mode / Full QA
+Loadout / deck teleport as needed. Keep original user saves intact.
+1. Quiet deck: Explore plays once. Legacy-only installation still works.
+2. Let one awake enemy see/attack you: one fade to Combat. Mere proximity or
+   a peril tile need not select Combat. Record noticeable first-open stalls.
+3. Kill/disengage: Combat survives brief sight loss, then returns to Explore
+   around the last sighting/attack deadline (~3.57 game seconds), plus fades.
+4. Re-engage during AND just after the return fade: no double fades, silence
+   or reopen spam. During the fade, Combat can restart from its beginning.
+5. Multiple enemies: kill one while another engages; no abrupt state chatter.
+6. Teleport while Explore: destination Explore, no old-deck track remaining.
+7. Teleport while Combat and during a fade: destination Explore; refreshed
+   destination hostility engages its own Combat. Old combat cannot persist.
+8. Remove/rename Combat while app stopped; revisit: Explore continues, one
+   fallback diagnostic. Restore and revisit: Combat works again.
+9. Remove BOTH Explore names: stock music works. Try invalid MP3 data in a
+   temporary test copy; failure stays per-deck and other decks still work.
+10. Save/load near and during combat, including same-deck older/newer saves:
+    fresh game threat controls music; no stuck old Combat or save changes.
+11. Audiolog in Explore, including combat starting during the log: music
+    stays ducked, speech/SFX remain intelligible, gain restores when finished.
+12. Audiolog in Combat, including return fade: same duck/recovery policy.
+13. In-game pause/resume in both states and during fade: music continues;
+    paused game time does not run down the threat hold.
+14. Android Home -> Recents resume in Explore, repeatedly, then lock/unlock:
+    no restart, silence, lost ownership or accumulating SFX latency.
+15. Repeat Android background/resume in Combat AND during either fade.
+16. Repeat at least 20 engage/disengage cycles. Listen for state thrashing,
+    delayed transitions, resource growth symptoms or increasing audio latency.
+17. Select Original and restart: ordinary dynamic stock music; installed MP3s
+    have no effect. Spot-check controls, speech and save/load. Restore God OFF.
+
+LOGS / RESULTS HANDOFF
+Filter full logcat for ExternalMusic; Android tags may be SDL/APP or SDL:
+  adb logcat -v threadtime "SDL/APP:I" "SDL:I" "AndroidRuntime:E" "*:S"
+request logs include level, old/new state, raw stock deadline, retained deadline,
+game time and pending-fade retarget. fade start/complete, file path, fallback,
+play failure, suspend/resume and deck switches explain owner decisions without
+per-frame logs. Normal Android device pause is intentionally not a new module
+event; existing lifecycle diagnostics remain available if an issue needs tracing.
+Record device, deck, test number, audible result and corresponding log sequence.
+Label results user-reported hardware PASS only after the user supplies them.
+Maintenance elevator: intermittent / not reproduced on retest; no root cause
+or fix claimed. Preserve existing diagnostic workflow if it occurs again.

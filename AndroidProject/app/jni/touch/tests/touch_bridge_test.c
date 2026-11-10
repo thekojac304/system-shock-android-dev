@@ -30,6 +30,7 @@ static int center_warps, relative_off;
 static int action_down[TOUCH_ACTION_COUNT], action_up[TOUCH_ACTION_COUNT], action_cancels;
 static bool sprint_active;
 static TouchCursorTarget cursor_target;
+static bool test_assist;
 static Uint32 test_ticks;
 static int snapshot_count,selection_calls,selection_id,selection_category;
 static int direct_taps,drag_edges;
@@ -48,6 +49,12 @@ bool touch_game_radial_select(TouchRadialCategory category,int id) {
 }
 static bool switch_target_on_press;
 TouchCursorTarget touch_cursor_target_at(int x,int y) {(void)x; (void)y; return cursor_target;}
+bool touch_ui_assist_game_point(int *x,int *y,TouchAssistDebug *debug) {
+    (void)debug;
+    if (!test_assist) return false;
+    *x=700;*y=740;
+    return true;
+}
 void touch_input_action(TouchAction action,bool down) {
     assert(action>=0 && action<TOUCH_ACTION_COUNT);
     if(down) action_down[action]++; else action_up[action]++;
@@ -130,6 +137,7 @@ static void reset(void) {
     test_ticks=0; snapshot_count=selection_calls=0;
     touch_bridge_init(); touch_bridge_controller(false); touch_bridge_sync();
     event_count=0; cursor_target=TOUCH_TARGET_UI_CONTROL; switch_target_on_press=false;
+    test_assist=false;
     direct_taps=drag_edges=0;
 }
 static void radial_dispatch(void) {
@@ -323,18 +331,25 @@ static void cursor_regions(void) {
     finger(SDL_FINGERDOWN,2,.5f,.5f); finger(SDL_FINGERUP,2,.5f,.5f);
     assert(event_count==2 && events[0]==1 && events[1]==-1);
     assert(direct_taps==1);
+    /* A known assisted tab must use the UI path even when fullscreen's
+       view classifier calls that position WORLD. */
+    cursor_target=TOUCH_TARGET_WORLD; test_assist=true; event_count=0;
+    finger(SDL_FINGERDOWN,60,.5f,.5f); finger(SDL_FINGERUP,60,.5f,.5f);
+    assert(direct_taps==2 && event_count==2 && events[0]==1 && events[1]==-1);
+    assert(aim_x[0]==700 && aim_y[0]==740);
+    test_assist=false; event_count=0;
     cursor_target=TOUCH_TARGET_WORLD; event_count=0;
     finger(SDL_FINGERDOWN,3,.5f,.5f); finger(SDL_FINGERUP,3,.5f,.5f);
     assert(event_count==4 && events[0]==1 && events[1]==-1 &&
            events[2]==1 && events[3]==-1);
-    assert(direct_taps==1);
+    assert(direct_taps==2);
     for(int i=0;i<4;i++) assert(aim_x[i]==512 && aim_y[i]==384);
     event_count=0;
     finger(SDL_FINGERDOWN,4,.5f,.5f);
     finger(SDL_FINGERMOTION,4,.6f,.5f);
     finger(SDL_FINGERUP,4,.6f,.5f);
     assert(event_count==2 && events[0]==1 && events[1]==-1);
-    assert(drag_edges==2 && direct_taps==1);
+    assert(drag_edges==2 && direct_taps==2);
     event_count=0;
     for(int i=0;i<3;i++) {
         finger(SDL_FINGERDOWN,10+i,.5f,.5f);
@@ -530,8 +545,19 @@ static void cutscene_touch_skip(void) {
     assert(buttons==2); /* gameplay FIRE still works after the movie */
     finger(SDL_FINGERUP,54,.86f,.73f);
 }
+static void legacy_ui_bars(void) {
+    reset(); nx=1920; ny=1080; touch_bridge_sync();
+    assert(game_viewport.x>0 && game_viewport.w<1920);
+    int before=direct_taps;
+    output(NULL,TOUCH_POINTER_TAP,game_viewport.x-20,540);
+    assert(direct_taps==before && event_count==0);
+    output(NULL,TOUCH_POINTER_TAP,game_viewport.x+game_viewport.w+20,540);
+    assert(direct_taps==before && event_count==0);
+    output(NULL,TOUCH_POINTER_TAP,game_viewport.x+game_viewport.w/2,540);
+    assert(direct_taps==before+1);
+}
 int main(void) {
-    aim_and_actions(); movement_and_lifecycle(); cursor_fallback(); full_surface_and_transition(); alpha2_actions(); cursor_regions(); cutscene_touch_skip();
+    aim_and_actions(); movement_and_lifecycle(); cursor_fallback(); full_surface_and_transition(); alpha2_actions(); cursor_regions(); cutscene_touch_skip(); legacy_ui_bars();
     touch_world_item_auto_return(); touch_world_item_reset();
     settings_overlay_lifecycle();
     radial_dispatch();

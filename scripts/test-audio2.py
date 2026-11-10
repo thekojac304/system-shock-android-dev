@@ -21,6 +21,8 @@ constants = '\n'.join(line for line in prefs.splitlines() if line.startswith('st
 # Compile unchanged production parsing/saving functions, excluding unrelated
 # engine/keybinding headers and replacing only the file path/global sync boundary.
 functions = prefs[prefs.index('static char *trim('):prefs.index('//  Set the corresponding Shock globals')]
+defaults = prefs[prefs.index('void SetDefaultPrefs('):prefs.index('static char *GetPrefsPathFilename(')]
+parsers = prefs[prefs.index('static int parse_percent('):prefs.index('void SetDefaultPrefs(')]
 fixture = r'''
 #include <assert.h>
 #include <stdbool.h>
@@ -43,11 +45,30 @@ checks = r'''
 static void check(const char *text, int expected) {
     FILE *f=fopen("prefs-test.txt","wb"); assert(f);
     fputs(text,f); fclose(f);
+    SetDefaultPrefs();
     gShockPrefs.soSoundtrack=999;
     assert(LoadPrefs()==0 && gShockPrefs.soSoundtrack==expected);
 }
 int main(void) {
+    remove("prefs-test.txt"); SetDefaultPrefs(); curr_vol_lev=100;
+    assert(LoadPrefs()==0 && curr_vol_lev==75); /* first-run defaults applied before save */
     check("",0);
+    assert(gShockPrefs.soMasterVolume==100 && gShockPrefs.soAmbientVolume==70);
+    assert(gShockPrefs.soDynamicMusic && !gShockPrefs.soEnhancedAmbience);
+    check("music-volume = nonsense\nsfx-volume = -2\nalog-volume = 900\n",0);
+    assert(gShockPrefs.soMusicVolume==75 && gShockPrefs.soSfxVolume==100);
+    assert(gShockPrefs.soAudioLogVolume==100);
+    check("master-volume = 35\nambient-volume = 44\ndynamic-music = false\nenhanced-ambience = true\n",0);
+    assert(gShockPrefs.soMasterVolume==35 && gShockPrefs.soAmbientVolume==44);
+    assert(!gShockPrefs.soDynamicMusic && gShockPrefs.soEnhancedAmbience);
+    check("master-volume = bogus\nambient-volume = 500\ndynamic-music = sometimes\nenhanced-ambience = sometimes\n",0);
+    assert(gShockPrefs.soMasterVolume==100 && gShockPrefs.soAmbientVolume==70);
+    assert(gShockPrefs.soDynamicMusic && !gShockPrefs.soEnhancedAmbience);
+    assert(!gShockPrefs.soExplorationMusicBreaks);
+    check("exploration_music_breaks = true\n",0);
+    assert(gShockPrefs.soExplorationMusicBreaks);
+    check("exploration_music_breaks = false\n",0);
+    assert(!gShockPrefs.soExplorationMusicBreaks);
     check("soundtrack = original\n",0);
     check("soundtrack = remake\n",1);
     check("soundtrack = ReMaKe\n",1);
@@ -67,6 +88,7 @@ int main(void) {
     char data[4096]={0}; assert(fread(data,1,sizeof(data)-1,f)>0); fclose(f);
     assert((unsigned char)data[0]!=0xef && (unsigned char)data[0]!=0xff);
     assert(strstr(data,"soundtrack = remake") && !strstr(data,"replacement_medical_music"));
+    assert(strstr(data,"exploration_music_breaks = false"));
     assert(strstr(data,"qa_cheats = true") && strstr(data,"gamma = 38"));
     assert(LoadPrefs()==0 && gShockPrefs.soSoundtrack==1);
     const char *expected[]={"reactor","medical","research","maintenance","storage",
@@ -83,7 +105,7 @@ int main(void) {
     return 0;
 }
 '''
-(out / 'prefs_test.c').write_text(fixture + constants + '\n' + functions + checks)
+(out / 'prefs_test.c').write_text(fixture + constants + '\n' + parsers + defaults + functions + checks)
 compiler = str(Path(args.compiler).resolve()) if Path(args.compiler).is_file() else args.compiler
 subprocess.run([compiler, '-std=c99', '-Wall', '-Wextra', '-Werror', '-O2', '-DRP5NP_QA_TOOLS',
                 '-I' + str(root / 'SourceSnapshot/src/MacSrc'), str(out / 'prefs_test.c'),
@@ -94,7 +116,14 @@ installer = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(installer)
 raw = b'\xef\xbb\xbfqa_cheats = true\r\nmusic-volume = 73\r\n# caf\xc3\xa9\r\nsoundtrack = original\r\nsoundtrack = bad\r\nreplacement_medical_music = true'
 updated = installer.update_preferences(raw, 'remake')
+assert len(installer.FILENAMES) == 33
+for deck in ('medical', 'research', 'reactor', 'maintenance', 'storage', 'flightdeck',
+             'executive', 'groves', 'engineering', 'security', 'bridge'):
+    for suffix in ('', '_explore', '_combat'):
+        assert deck + suffix + '.mp3' in installer.FILENAMES
 assert updated == b'qa_cheats = true\r\nmusic-volume = 73\r\n# caf\xc3\xa9\r\nreplacement_medical_music = true\nsoundtrack = remake\n'
+assert installer.update_preferences(b'soundtrack = remake\nexploration_music_breaks = false\n', breaks='on') == \
+       b'soundtrack = remake\nexploration_music_breaks = true\n'
 try:
     installer.update_preferences(b'\xff\xfea\x00', 'original')
     raise AssertionError('UTF-16 must not silently corrupt unrelated preferences')

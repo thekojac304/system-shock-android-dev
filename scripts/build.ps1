@@ -5,13 +5,17 @@ param(
     [string]$JavaHome = $env:JAVA_HOME,
     [string]$DepsRoot = (Join-Path (Split-Path -Parent $PSScriptRoot) '.deps'),
     [switch]$SkipGitCleanCheck,
-    [switch]$AudioDiagnostics
+    [switch]$AudioDiagnostics,
+    [switch]$Audio4FastBreaks
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 if ($AudioDiagnostics -and $Variant -ne 'qa') {
     throw 'AudioDiagnostics is restricted to the separate QA application.'
+}
+if ($Audio4FastBreaks -and $Variant -ne 'qa') {
+    throw 'Audio4FastBreaks is restricted to the separate QA application.'
 }
 
 $Root = Split-Path -Parent $PSScriptRoot
@@ -96,7 +100,7 @@ $VariantInfo = switch ($Variant) {
 $AndroidProject = Join-Path $Root 'AndroidProject'
 Push-Location $AndroidProject
 try {
-    & .\gradlew.bat --no-daemon $VariantInfo.Task "-Prp5npAudioDiagnostics=$($AudioDiagnostics.IsPresent.ToString().ToLowerInvariant())"
+    & .\gradlew.bat --no-daemon $VariantInfo.Task "-Prp5npAudioDiagnostics=$($AudioDiagnostics.IsPresent.ToString().ToLowerInvariant())" "-Prp5npAudio4FastBreaks=$($Audio4FastBreaks.IsPresent.ToString().ToLowerInvariant())"
     if ($LASTEXITCODE -ne 0) {
         throw "Gradle build failed: $LASTEXITCODE"
     }

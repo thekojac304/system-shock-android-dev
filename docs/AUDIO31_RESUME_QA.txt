@@ -1,0 +1,116 @@
+AUDIO3.1 - Runtime Explore / Combat playback-position resume
+2026-10-03
+
+Scope
+No save-format or soundtrack-file change. AUDIO3 threat input, retained stock
+combat deadline, fallback rules and original
+music remain as before. The user reports that hardware-tested resume sounds
+decent; detailed seek accuracy remains unverified.
+
+AUDIO3 fade tuning - 2026-10-04
+The previous AUDIO3 external soundtrack transition used 500 ms outgoing and
+500 ms incoming fades. The new listening test uses 1000 ms in each direction:
+a longer sequential fade transition. The user reports that the earlier
+handoff was too obvious. This is not simultaneous playback or a true
+crossfade. Hardware result for the 1000 ms handoff: PENDING.
+
+Pinned SDL_mixer investigation
+The project pins SDL_mixer 2.8.1 (commit 171eb2d420d5643e4ee11514a06e04a41a463bbd).
+Android CMake enables MP3 through minimp3, not mpg123. SDL_mixer.h declares
+Mix_GetMusicPosition, Mix_MusicDuration, Mix_SetMusicPosition and
+Mix_FadeInMusicPos. music.c permits Mix_SetMusicPosition only after a music
+object starts; Mix_FadeInMusicPos starts and seeks under the audio lock before
+playback becomes active. The latter is used for resume with an incoming fade.
+Music objects are opened once per deck visit (Combat on demand) and retained
+across state switches; the AUDIO3 state machine waits for outgoing fade
+completion before starting the next object.
+
+minimp3's Tell reads dec.cur_sample / (channels * sample_rate): decoded PCM
+sample time, not encoded MP3 byte offset. Its duration uses decoded sample
+count. Its seek uses MP3D_SEEK_TO_SAMPLE and a frame index with predecode for
+the MP3 bit reservoir. AudioStream buffering means reported position can be
+slightly ahead of audio at the output. The minimp3 Seek wrapper returns 0
+without propagating mp3dec_ex_seek's result; a successful SDL_mixer return
+therefore does not alone prove the decoder reached the requested sample.
+The immediately reported timestamp is logged for comparison, but an Android
+listening test is needed to establish audible accuracy and seek latency.
+
+Runtime behavior
+For the active deck visit, Explore and Combat each have started, valid and
+position fields. A first play starts at 0. A transition captures the outgoing
+position before Mix_FadeOutMusic. Invalid (negative, NaN, over 24 hours, or
+more than one second beyond a known duration) readings are discarded. Once
+the asynchronous fade ends, a returning track starts through
+Mix_FadeInMusicPos at its saved position. If that call fails, the track is
+retried at 0 and the seek failure is logged; ordinary playback failure keeps
+AUDIO3's Combat-to-Explore or Explore-to-stock fallback. A retarget during an
+outgoing fade resumes the final requested track using its own memory.
+
+Temporary near-end rule: when duration is known and fewer than five seconds
+remain at the saved position, restart at 0. For unknown duration, do not
+guess a safe endpoint. This rule is deliberately simple and will be replaced
+by per-track loop/resume regions in a future milestone. Natural full-file
+looping still restarts abruptly at the file beginning.
+
+Deck changes discard both positions. musicai_clear, invoked during game
+closedown/new game/load, shuts down retained external decoders and resets
+runtime positions and threat state, including same-deck loads. Nothing is
+serialized. Theme/menu suspension pauses the current decoder and pending
+fade without clearing positions; SDL device background pause remains unchanged.
+Audiolog ducking only changes volume. Missing Combat keeps Explore; missing
+Explore restores stock. No fake position is stored for an absent Combat file.
+
+Diagnostics
+AUDIO3.1 logs one save per outgoing transition, requested resume, immediately
+reported position and delta, invalid reading, near-end guard, seek failure,
+runtime reset, suspend and theme/lifecycle resume. It does not poll/log every
+frame. Compare requested and reported positions with listening: minimp3's
+decoded cursor may be ahead of the audible output.
+
+Validation completed
+Host deterministic AUDIO3.1/AUDIO3 transition tests, AUDIO1/AUDIO2 owner
+regressions, no-mixer portability, and AUDIO2 preferences/installer tests pass.
+The tests cover first playback at zero, independent resume, invalid readings,
+near-end restart, load/deck reset, repeated switches, retargeted fades,
+missing-file fallback and explicit seek failure fallback.
+
+A real SDL_mixer 2.8.1 Windows dummy-device test passed using locally generated
+15-second MP3 tones. Its logs showed Explore captured at 1.024 s and resumed
+at a requested/reported 1.024 s; Combat captured at 0.768 s and resumed at a
+requested/reported 0.768 s. Subsequent cycles kept independent positions.
+The immediate zero delta is expected from minimp3's cursor assignment and
+does not prove audible sample accuracy. This host test also passed fade,
+device pause, SFX/postmix and stock callback checks. The user reports that
+AUDIO3.1 resume sounds decent on hardware; the longer fade is untested there.
+
+ARM64 QA build and package integrity verification pass. The package is
+io.github.raposomiguel50.systemshock.qa, version 1.0.0-qa, with ARM64 native
+libraries and 16 KB ZIP/ELF alignment. Handoff APK:
+dist/audio31/SystemShock-AUDIO31-Resume-qa.apk
+SHA256: 1c9f0287634378c7511f20b9c00e600fce3f9cff3ef7b94169bf0f94ba7bcfc5
+
+1000 ms fade tuning validation - 2026-10-04
+Host AUDIO3, AUDIO1, and AUDIO2 regression tests pass. The real SDL_mixer
+dummy-device smoke test passes with existing generated 15-second MP3 tones,
+including repeated transitions, retargeting, position resume, and lifecycle
+checks. ARM64 QA build and package integrity verification pass. Current APK:
+AndroidProject/app/build/outputs/apk/qa/app-qa.apk
+SHA256: 5c3abc93ca09f7115eac1931d93c819f56c21c755e91dd554430e8c52d3d0fa6
+The listening result for the longer sequential fade transition is PENDING.
+
+Hardware QA checklist (PENDING)
+1. Start Medical and listen to Explore for about 30 seconds. Trigger Combat,
+   listen 15-20 seconds, then end combat. Confirm Explore resumes near where
+   it stopped. Trigger Combat again; confirm Combat resumes independently.
+2. Switch Explore <-> Combat 5-10 times. Check for zero restarts after first
+   play, silence, large/drifting jumps, increasing delay, log spam or crash.
+3. Confirm each returning track fades in cleanly without a hard cut.
+4. If practical, switch away near a track ending, then return. Check the
+   temporary restart guard avoids a near-immediate loop.
+5. Teleport to another deck. Confirm its first Explore and Combat plays begin
+   at 0. Save and reload; confirm the runtime memory resets.
+6. Background/resume with Explore active, switch twice, then repeat with
+   Combat active. Check for sane positions, one stream, and no silence.
+7. Inspect AUDIO3.1 save/resume/resumed logs and note audible position versus
+   requested time. Any large mismatch or long stall should be reported with
+   deck, track, requested/reported values and device model.

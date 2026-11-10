@@ -158,6 +158,7 @@ set(MAC_SRC
 	src/MacSrc/OpenGL.cc
 	src/MacSrc/Xmi.c
 	src/MacSrc/ExternalMusic.c
+	src/MacSrc/AmbientDirector.c
 	src/MusicSrc/MusicDevice.c
 )
 

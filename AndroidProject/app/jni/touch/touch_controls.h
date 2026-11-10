@@ -26,13 +26,27 @@ typedef enum {
     TOUCH_POINTER_DOWN, TOUCH_POINTER_MOVE, TOUCH_POINTER_UP,
     TOUCH_MODE_CHANGED, TOUCH_CANCEL, TOUCH_ACTION_DOWN, TOUCH_ACTION_UP,
     TOUCH_POINTER_TAP, TOUCH_UI_CHANGED, TOUCH_SETTINGS_SAVE,
-    TOUCH_RADIAL_SELECT, TOUCH_HAPTIC, TOUCH_QA_COMMAND, TOUCH_VISUAL_COMPARE
+    TOUCH_RADIAL_SELECT, TOUCH_HAPTIC, TOUCH_QA_COMMAND, TOUCH_VISUAL_COMPARE,
+    TOUCH_AUDIO_OPEN, TOUCH_AUDIO_CHANGED, TOUCH_AUDIO_SAVE
 } TouchOutput;
 /* Outputs are ordered edges, not polled booleans: even a down/up between
    game polls reaches the original input queue. Cancellation invalidates them. */
 typedef void (*TouchEmit)(void *user, TouchOutput output, float x, float y);
 typedef struct { float x, y, radius; } TouchCircle;
 typedef struct { float x, y, w, h; } TouchRect;
+typedef enum {
+    TOUCH_ASSIST_TAP, TOUCH_ASSIST_DOWN, TOUCH_ASSIST_DRAG,
+    TOUCH_ASSIST_NO_TAP, TOUCH_ASSIST_CANCEL
+} TouchAssistStage;
+typedef struct {
+    TouchRect original, effective, cluster;
+    float raw_x, raw_y, selected_x, selected_y;
+    int64_t device, finger;
+    const char *kind;
+    int index;
+    TouchAssistStage stage;
+    bool valid, selected;
+} TouchAssistVisual;
 typedef struct {
     float width, height, move_radius, move_split;
     TouchCircle fire, use, settings, stick;
@@ -49,16 +63,23 @@ typedef struct {
     bool dragging;
     bool radial_pending, radial_cancelled, radial_opened;
 } TouchFinger;
-typedef enum { TOUCH_UI_CLOSED, TOUCH_UI_SETTINGS, TOUCH_UI_EDITOR, TOUCH_UI_QA } TouchPanel;
+typedef enum { TOUCH_UI_CLOSED, TOUCH_UI_SETTINGS, TOUCH_UI_EDITOR, TOUCH_UI_QA, TOUCH_UI_AUDIO } TouchPanel;
 typedef enum {
     TU_EDIT, TU_OPACITY_DOWN, TU_OPACITY_UP, TU_X_DOWN, TU_X_UP,
     TU_Y_DOWN, TU_Y_UP, TU_INVERT, TU_STICK_DOWN, TU_STICK_UP,
     TU_RESET, TU_CANCEL, TU_SAVE, TU_PREV, TU_NEXT, TU_SCALE_DOWN,
     TU_SCALE_UP, TU_BACK, TU_DOCK, TU_PAGE, TU_HAPTICS,
     TU_HAPTIC_STRENGTH, TU_WHEEL_WEAPON, TU_WHEEL_CONSUMABLE,
-    TU_WHEEL_EXPLOSIVE, TU_QA, TU_QA_GOD, TU_QA_HEAL, TU_QA_LOADOUT, TU_QA_CLOSE,
+    TU_WHEEL_EXPLOSIVE, TU_AUDIO, TU_AUDIO_BACK, TU_AUDIO_MASTER,
+    TU_AUDIO_MUSIC, TU_AUDIO_SFX, TU_AUDIO_AMBIENT,
+    TU_AUDIO_SOUNDTRACK, TU_AUDIO_DYNAMIC, TU_AUDIO_ENABLE,
+    TU_QA, TU_QA_GOD, TU_QA_HEAL, TU_QA_LOADOUT, TU_QA_ASSIST, TU_QA_CLOSE,
     TU_QA_DECK_FIRST, TU_QA_DECK_LAST=TU_QA_DECK_FIRST+12, TU_COUNT
 } TouchUiAction;
+typedef struct {
+    int master, music, sfx, ambient;
+    bool remake, dynamic, enhanced;
+} TouchAudioSettings;
 typedef int (*TouchRadialPopulate)(void *user, TouchRadialCategory category,
                                     TouchRadialEntry entries[TOUCH_RADIAL_MAX_ENTRIES]);
 typedef struct {
@@ -70,7 +91,8 @@ typedef struct {
     unsigned fire_count, use_count;
     unsigned action_count[TOUCH_ACTION_COUNT];
     bool sprint_latched;
-    bool qa_enabled, qa_god, compare_enabled;
+    bool qa_enabled, qa_god, qa_assist_debug, compare_enabled;
+    TouchAssistVisual assist_visual;
     int compare_mode, compare_post_enabled, compare_post_choice, compare_level;
     int compare_pressed; /* 0 MODE, 1 POST, -1 idle */
     int compare_notice; /* 0 MODE, 1 POST, -1 hidden */
@@ -82,6 +104,7 @@ typedef struct {
     float cursor_slop, look_scale;
     float stick_reference_height;
     TouchSettings settings, saved_settings;
+    TouchAudioSettings audio;
     TouchPanel panel;
     int selected, ui_action, settings_page;
     bool ui_owned, ui_drag, toolbar_top, save_failed;
