@@ -11,7 +11,10 @@ own app identity and the fixes needed to run it on a phone.
 
 ## Download
 
-**[Download 1.1.0-beta.2 (pre-release)](https://github.com/thekojac304/system-shock-android-dev/releases/tag/v1.1.0-beta.2)**:
+**[Download 1.1.0-beta.2 (beta)](https://github.com/thekojac304/system-shock-android/releases/tag/v1.1.0-beta.2)**
+from the public repository [thekojac304/system-shock-android](https://github.com/thekojac304/system-shock-android),
+which holds the reviewed source and the public release. The same APK is attached to this private repository's
+[v1.1.0-beta.2 release](https://github.com/thekojac304/system-shock-android-dev/releases/tag/v1.1.0-beta.2):
 `SystemShock-TouchEdition-1.1.0-beta.2-arm64-v8a.apk` (3.7 MB) and `SHA256SUMS.txt`.
 
 The APK contains no game data. You need the `res` folder (with `data` and `sound`) from your own copy of System Shock.
@@ -48,7 +51,7 @@ layout), [Touch Alpha 4](docs/TOUCH_ALPHA_4.md) (radial wheels and haptics).
 
 ## Status
 
-**Pre-release.** Version 1.1.0-beta.2 was tested on a Galaxy S26 Ultra (SM-S948U1, Android 17) on 2026-11-10:
+**Beta.** Version 1.1.0-beta.2 was tested on a Galaxy S26 Ultra (SM-S948U1, Android 17) on 2026-11-10:
 
 | Area | Result |
 |---|---|
@@ -87,6 +90,10 @@ layout), [Touch Alpha 4](docs/TOUCH_ALPHA_4.md) (radial wheels and haptics).
 Everything else (the engine, game logic, original graphics and sound, the importer) is Shockolate and upstream's work.
 
 ## Source and branches
+
+This private repository holds the full development history. Reviewed release sources are published as curated
+snapshots to the public repository.
+
 
 | Branch | What it is |
 |---|---|
