@@ -24,8 +24,8 @@ android {
         applicationId "io.github.thekojac304.systemshock"
         minSdkVersion 33
         targetSdkVersion 33
-        versionCode 10100
-        versionName "1.1.0-beta.1"
+        versionCode 10101
+        versionName "1.1.0-beta.2"
 
         externalNativeBuild {
             cmake {
